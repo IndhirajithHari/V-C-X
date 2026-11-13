@@ -26,6 +26,7 @@ class TreeEntry:
     path: str
     sha: str
     file_type: str = "binary/unknown"
+    obj_type: str = "blob"  # "blob" or "tree"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -33,16 +34,38 @@ class TreeEntry:
             "path": self.path,
             "sha": self.sha,
             "file_type": self.file_type,
+            "obj_type": self.obj_type,
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> TreeEntry:
+        mode = data["mode"]
+        default_obj = "tree" if mode == FileMode.DIRECTORY.value else "blob"
         return cls(
-            mode=data["mode"],
+            mode=mode,
             path=data["path"],
             sha=data["sha"],
             file_type=data.get("file_type", "binary/unknown"),
+            obj_type=data.get("obj_type", default_obj),
         )
+
+
+@dataclass
+class MergeConflict:
+    path: str
+    domain: str
+    description: str
+    base_snippet: Optional[str] = None
+    ours_snippet: Optional[str] = None
+    theirs_snippet: Optional[str] = None
+
+
+@dataclass
+class MergeResult:
+    success: bool
+    merged_shas: Dict[str, str] = field(default_factory=dict)
+    conflicts: List[MergeConflict] = field(default_factory=list)
+    semantic_resolutions: List[str] = field(default_factory=list)
 
 
 @dataclass

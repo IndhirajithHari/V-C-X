@@ -1,5 +1,12 @@
+README.md
 pyproject.toml
 setup.py
+tests/test_analyzers.py
+tests/test_audit_fixes.py
+tests/test_core.py
+tests/test_edge_cases.py
+tests/test_semantic_differ.py
+tests/test_watcher.py
 vcx/__init__.py
 vcx.egg-info/PKG-INFO
 vcx.egg-info/SOURCES.txt
@@ -13,10 +20,12 @@ vcx/agent/semantic_differ.py
 vcx/cli/main.py
 vcx/core/index.py
 vcx/core/object_store.py
+vcx/core/pack.py
 vcx/core/repository.py
 vcx/core/types.py
 vcx/diff/delta_engine.py
 vcx/diff/detector.py
+vcx/diff/merger.py
 vcx/diff/analyzers/base.py
 vcx/diff/analyzers/binary.py
 vcx/diff/analyzers/cad_3d.py

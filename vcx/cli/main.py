@@ -240,6 +240,89 @@ def cmd_agent(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_branch(args: argparse.Namespace) -> int:
+    try:
+        repo = Repository.find()
+    except FileNotFoundError as e:
+        print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+    if args.name:
+        try:
+            repo.create_branch(args.name)
+            print(f"Created branch '{args.name}'")
+            return 0
+        except ValueError as e:
+            print(f"fatal: {e}", file=sys.stderr)
+            return 1
+
+    branches = repo.list_branches()
+    for name, is_current in branches:
+        prefix = "* " if is_current else "  "
+        color = "\033[32m" if is_current else ""
+        reset = "\033[0m" if is_current else ""
+        print(f"{prefix}{color}{name}{reset}")
+    return 0
+
+
+def cmd_checkout(args: argparse.Namespace) -> int:
+    try:
+        repo = Repository.find()
+    except FileNotFoundError as e:
+        print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        repo.checkout(args.target)
+        print(f"Switched to branch/commit '{args.target}'")
+        return 0
+    except Exception as e:
+        print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_merge(args: argparse.Namespace) -> int:
+    try:
+        repo = Repository.find()
+    except FileNotFoundError as e:
+        print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        result = repo.merge(args.branch)
+        if result.success:
+            print(f"Merge successful: integrated '{args.branch}' into {repo.head_ref or 'HEAD'}")
+            if result.semantic_resolutions:
+                print("Semantic resolutions applied:")
+                for r in result.semantic_resolutions:
+                    print(f"  * {r}")
+            return 0
+        else:
+            print(f"\033[31mAutomatic merge failed with conflicts:\033[0m", file=sys.stderr)
+            for c in result.conflicts:
+                print(f"  [{c.domain}] {c.path}: {c.description}", file=sys.stderr)
+            return 1
+    except Exception as e:
+        print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_gc(args: argparse.Namespace) -> int:
+    try:
+        repo = Repository.find()
+    except FileNotFoundError as e:
+        print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+    stats = repo.gc()
+    print("VCX Garbage Collection Complete:")
+    print(f"  * Packed objects:   {stats['packed_objects']}")
+    print(f"  * Pruned objects:   {stats['pruned_objects']}")
+    if stats.get("packfile"):
+        print(f"  * Generated pack:   {stats['packfile']}")
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="vcx",
@@ -278,6 +361,25 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_log.add_argument("-n", "--limit", type=int, default=10, help="Max commits to display")
     p_log.add_argument("--json", action="store_true", help="Output log as JSON")
     p_log.set_defaults(func=cmd_log)
+
+    # branch
+    p_branch = subparsers.add_parser("branch", help="List or create branches")
+    p_branch.add_argument("name", nargs="?", help="New branch name")
+    p_branch.set_defaults(func=cmd_branch)
+
+    # checkout
+    p_checkout = subparsers.add_parser("checkout", help="Switch branches or restore working tree")
+    p_checkout.add_argument("target", help="Branch name or commit SHA")
+    p_checkout.set_defaults(func=cmd_checkout)
+
+    # merge
+    p_merge = subparsers.add_parser("merge", help="Join two development histories with semantic resolution")
+    p_merge.add_argument("branch", help="Branch name to merge into current branch")
+    p_merge.set_defaults(func=cmd_merge)
+
+    # gc
+    p_gc = subparsers.add_parser("gc", help="Pack repository objects and clean unreachable files")
+    p_gc.set_defaults(func=cmd_gc)
 
     # watch
     p_watch = subparsers.add_parser("watch", help="Watch workspace and generate semantic commit messages")

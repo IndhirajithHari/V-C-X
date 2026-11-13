@@ -10,9 +10,10 @@ from vcx.agent.schemas import DifferOutput
 from vcx.agent.semantic_differ import SemanticDifferAgent
 from vcx.core.index import Index
 from vcx.core.object_store import ObjectStore
-from vcx.core.types import Commit, FileChangeType, FileMode, IndexEntry, ObjectType, TreeEntry
+from vcx.core.types import Commit, FileChangeType, FileMode, IndexEntry, MergeConflict, MergeResult, ObjectType, TreeEntry
 from vcx.diff.delta_engine import DeltaEngine
 from vcx.diff.detector import detect_file_type
+from vcx.diff.merger import SemanticMerger
 
 
 class Repository:
@@ -100,14 +101,13 @@ class Repository:
             (self.vcx_dir / "HEAD").write_text(f"{commit_sha}\n", encoding="utf-8")
 
     def get_head_tree_entries(self) -> Dict[str, TreeEntry]:
-        """Return dict of path -> TreeEntry for the current HEAD commit."""
+        """Return dict of path -> TreeEntry for the current HEAD commit (recursively flattened)."""
         commit_sha = self.head_commit_sha
         if not commit_sha:
             return {}
         try:
             commit = self.store.read_commit(commit_sha)
-            entries = self.store.read_tree(commit.tree_sha)
-            return {e.path: e for e in entries}
+            return self.store.flatten_tree(commit.tree_sha)
         except Exception:
             return {}
 
@@ -300,17 +300,8 @@ class Repository:
                     "tags": sorted(list(all_tags)),
                 }
 
-        # Build tree entries
-        tree_entries = [
-            TreeEntry(
-                mode=e.mode,
-                path=e.path,
-                sha=e.sha,
-                file_type=e.file_type,
-            )
-            for e in index_entries
-        ]
-        tree_sha = self.store.write_tree(tree_entries)
+        # Build hierarchical Merkle tree structure
+        tree_sha = self.store.build_hierarchical_tree(index_entries)
 
         parent_shas = [self.head_commit_sha] if self.head_commit_sha else []
         commit_sha = self.store.write_commit(
@@ -341,3 +332,266 @@ class Repository:
                 break
 
         return commits
+
+    def create_branch(self, name: str) -> None:
+        """Create a new branch pointing to current HEAD commit."""
+        head_sha = self.head_commit_sha
+        if not head_sha:
+            raise ValueError("Cannot create branch: repository has no commits yet")
+        branch_file = self.vcx_dir / "refs" / "heads" / name
+        if branch_file.exists():
+            raise ValueError(f"Branch '{name}' already exists")
+        branch_file.parent.mkdir(parents=True, exist_ok=True)
+        branch_file.write_text(f"{head_sha}\n", encoding="utf-8")
+
+    def list_branches(self) -> List[Tuple[str, bool]]:
+        """List all branch names and whether they are active."""
+        heads_dir = self.vcx_dir / "refs" / "heads"
+        if not heads_dir.exists():
+            return []
+        current = self.head_ref.replace("refs/heads/", "") if self.head_ref else None
+        branches = []
+        for f in sorted(heads_dir.iterdir()):
+            if f.is_file():
+                branches.append((f.name, f.name == current))
+        return branches
+
+    def checkout(self, target: str) -> None:
+        """Switch branches or checkout commit, updating working tree and index."""
+        branch_file = self.vcx_dir / "refs" / "heads" / target
+        if branch_file.exists():
+            commit_sha = branch_file.read_text(encoding="utf-8").strip()
+            (self.vcx_dir / "HEAD").write_text(f"ref: refs/heads/{target}\n", encoding="utf-8")
+        else:
+            commit_sha = target
+            (self.vcx_dir / "HEAD").write_text(f"{commit_sha}\n", encoding="utf-8")
+
+        commit = self.store.read_commit(commit_sha)
+        target_entries = self.store.flatten_tree(commit.tree_sha)
+
+        # Clear index and stage target entries
+        self.index.clear()
+        for rel_path, entry in target_entries.items():
+            full_path = self.root / rel_path
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            blob_content = self.store.read_blob(entry.sha)
+            full_path.write_bytes(blob_content)
+            stat = full_path.stat()
+            self.index.add(
+                IndexEntry(
+                    path=rel_path,
+                    sha=entry.sha,
+                    size=len(blob_content),
+                    mtime=stat.st_mtime,
+                    mode=entry.mode,
+                    file_type=entry.file_type,
+                )
+            )
+        self.index.write()
+
+    def merge(
+        self,
+        target_branch: str,
+        author: str = "VCX Semantic Merger <merger@vcx.local>",
+    ) -> MergeResult:
+        """Perform 3-way semantic merge between current branch (ours) and target_branch (theirs)."""
+        branch_file = self.vcx_dir / "refs" / "heads" / target_branch
+        if not branch_file.exists():
+            raise ValueError(f"Branch '{target_branch}' not found")
+
+        theirs_sha = branch_file.read_text(encoding="utf-8").strip()
+        ours_sha = self.head_commit_sha
+        if not ours_sha:
+            raise ValueError("Current branch has no commits")
+
+        if ours_sha == theirs_sha:
+            return MergeResult(success=True, semantic_resolutions=["Already up to date"])
+
+        # Find merge base (common ancestor)
+        base_sha = self._find_merge_base(ours_sha, theirs_sha)
+
+        base_entries = {}
+        if base_sha:
+            base_commit = self.store.read_commit(base_sha)
+            base_entries = self.store.flatten_tree(base_commit.tree_sha)
+
+        ours_entries = self.get_head_tree_entries()
+        theirs_commit = self.store.read_commit(theirs_sha)
+        theirs_entries = self.store.flatten_tree(theirs_commit.tree_sha)
+
+        merger = SemanticMerger()
+        all_paths = set(base_entries.keys()) | set(ours_entries.keys()) | set(theirs_entries.keys())
+
+        merged_shas: Dict[str, str] = {}
+        conflicts: List[MergeConflict] = []
+        resolutions: List[str] = []
+
+        for p in sorted(all_paths):
+            b_e = base_entries.get(p)
+            o_e = ours_entries.get(p)
+            t_e = theirs_entries.get(p)
+
+            # 1. Unchanged in ours, modified in theirs -> fast-forward file to theirs
+            if (b_e and o_e and b_e.sha == o_e.sha) or (not b_e and not o_e):
+                if t_e:
+                    merged_shas[p] = t_e.sha
+                    self._write_worktree_blob(p, t_e.sha, t_e.mode, t_e.file_type)
+                continue
+
+            # 2. Unchanged in theirs, modified in ours -> keep ours
+            if (b_e and t_e and b_e.sha == t_e.sha) or (not b_e and not t_e):
+                if o_e:
+                    merged_shas[p] = o_e.sha
+                continue
+
+            # 3. Identical changes on both branches
+            if o_e and t_e and o_e.sha == t_e.sha:
+                merged_shas[p] = o_e.sha
+                continue
+
+            # 4. Modified on both sides -> 3-way semantic merge!
+            b_bytes = self.store.read_blob(b_e.sha) if b_e else None
+            o_bytes = self.store.read_blob(o_e.sha) if o_e else b""
+            t_bytes = self.store.read_blob(t_e.sha) if t_e else b""
+            f_type = (o_e or t_e or b_e).file_type
+
+            success, merged_bytes, notes, conflict = merger.merge(
+                b_bytes, o_bytes, t_bytes, p, f_type
+            )
+            if success:
+                new_sha = self.store.write_blob(merged_bytes)
+                merged_shas[p] = new_sha
+                mode = (o_e or t_e).mode
+                self._write_worktree_blob(p, new_sha, mode, f_type)
+                resolutions.extend([f"{p}: {note}" for note in notes])
+            else:
+                if conflict:
+                    conflicts.append(conflict)
+
+        if conflicts:
+            return MergeResult(
+                success=False,
+                merged_shas=merged_shas,
+                conflicts=conflicts,
+                semantic_resolutions=resolutions,
+            )
+
+        # Successful merge: commit with two parents [ours, theirs]
+        self.index.write()
+        tree_sha = self.store.build_hierarchical_tree(self.index.entries())
+        summary_msg = f"Merge branch '{target_branch}'"
+        commit_sha = self.store.write_commit(
+            tree_sha=tree_sha,
+            parent_shas=[ours_sha, theirs_sha],
+            message=summary_msg,
+            author=author,
+            semantic_delta={
+                "action_summary": summary_msg[:49],
+                "technical_delta": resolutions or [f"Merged changes from {target_branch}"],
+                "inferred_intent": f"Integrate branch '{target_branch}' features into {self.head_ref or 'HEAD'}.",
+                "tags": ["merge", "multi-domain"],
+            },
+        )
+        self.update_head(commit_sha)
+        return MergeResult(
+            success=True,
+            merged_shas=merged_shas,
+            conflicts=[],
+            semantic_resolutions=resolutions,
+        )
+
+    def _write_worktree_blob(self, rel_path: str, blob_sha: str, mode: str, file_type: str) -> None:
+        full_path = self.root / rel_path
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        content = self.store.read_blob(blob_sha)
+        full_path.write_bytes(content)
+        stat = full_path.stat()
+        self.index.add(
+            IndexEntry(
+                path=rel_path,
+                sha=blob_sha,
+                size=len(content),
+                mtime=stat.st_mtime,
+                mode=mode,
+                file_type=file_type,
+            )
+        )
+
+    def _find_merge_base(self, sha_a: str, sha_b: str) -> Optional[str]:
+        """Find common ancestor commit using BFS."""
+        ancestors_a = set()
+        queue = [sha_a]
+        while queue:
+            curr = queue.pop(0)
+            if curr not in ancestors_a:
+                ancestors_a.add(curr)
+                try:
+                    c = self.store.read_commit(curr)
+                    queue.extend(c.parent_shas)
+                except Exception:
+                    pass
+
+        queue_b = [sha_b]
+        visited_b = set()
+        while queue_b:
+            curr = queue_b.pop(0)
+            if curr in ancestors_a:
+                return curr
+            if curr not in visited_b:
+                visited_b.add(curr)
+                try:
+                    c = self.store.read_commit(curr)
+                    queue_b.extend(c.parent_shas)
+                except Exception:
+                    pass
+        return None
+
+    def gc(self) -> Dict[str, Any]:
+        """Collect all reachable objects from all refs and execute garbage collection."""
+        reachable: Set[str] = set()
+
+        # Find all branch refs
+        ref_shas = []
+        heads_dir = self.vcx_dir / "refs" / "heads"
+        if heads_dir.exists():
+            for f in heads_dir.iterdir():
+                if f.is_file():
+                    try:
+                        ref_shas.append(f.read_text(encoding="utf-8").strip())
+                    except Exception:
+                        pass
+
+        if self.head_commit_sha:
+            ref_shas.append(self.head_commit_sha)
+
+        # Walk all commits and collect reachable trees & blobs
+        visited_commits = set()
+        for ref_sha in set(ref_shas):
+            queue = [ref_sha]
+            while queue:
+                c_sha = queue.pop(0)
+                if c_sha in visited_commits:
+                    continue
+                visited_commits.add(c_sha)
+                reachable.add(c_sha)
+                try:
+                    commit = self.store.read_commit(c_sha)
+                    queue.extend(commit.parent_shas)
+
+                    # Collect tree objects
+                    tree_queue = [commit.tree_sha]
+                    while tree_queue:
+                        t_sha = tree_queue.pop(0)
+                        reachable.add(t_sha)
+                        try:
+                            entries = self.store.read_tree(t_sha)
+                            for e in entries:
+                                reachable.add(e.sha)
+                                if e.obj_type == "tree" or e.mode == FileMode.DIRECTORY.value:
+                                    tree_queue.append(e.sha)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+        return self.store.gc(reachable)

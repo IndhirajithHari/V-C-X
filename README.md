@@ -1,37 +1,46 @@
 # VCX (Version Control for Everything)
 
-[![Tests](https://img.shields.io/badge/tests-17%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-40%20passed-brightgreen.svg)]()
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)]()
 [![Architecture](https://img.shields.io/badge/inspired%20by-build--your--own--x-orange.svg)](https://github.com/codecrafters-io/build-your-own-x)
 
 **VCX** is an autonomous, multi-domain version control system designed from the ground up to track not only source code, but also hardware/EDA designs, CAD/3D models, transactional databases, event logs, and binary assets. 
 
-Inspired by the Git internals from [codecrafters-io/build-your-own-x](https://github.com/codecrafters-io/build-your-own-x), VCX pairs content-addressable storage (Blobs, Trees, Commits) with an embedded, context-aware **Semantic Differ Agent** and an inotify-driven background file watcher.
+Inspired by the Git internals from [codecrafters-io/build-your-own-x](https://github.com/codecrafters-io/build-your-own-x), VCX combines Git-style content-addressable storage (Blobs, Hierarchical Merkle Trees, Commits, Packfiles) with an embedded, context-aware **Semantic Differ Agent**, a multi-domain **3-way semantic merge engine**, and an inotify-driven background file watcher.
 
 ---
 
 ## Key Features
 
-1. **Content-Addressable Object Store (`.vcx/objects`)**:
-   - SHA-256 hashed and zlib-compressed storage format.
-   - Canonical trees and commits with parent references and rich semantic delta attachments.
-   - Staging index (`.vcx/index`) tracking modes, hashes, sizes, mtimes, and detected domain types.
+1. **Hierarchical Merkle Trees (`tree -> subtree -> blob`)**:
+   - Git-style recursive tree nodes where subdirectories are stored as discrete subtree objects (`040000`).
+   - Merkle subtree reuse: unchanged subdirectories preserve their subtree SHA across commits, enabling instant commits in repositories with 100,000+ files.
 
-2. **Domain-Aware Diff Analyzers**:
-   - **Source Code (Python, Rust, C, C++)**: AST function signatures, class hierarchies, memory primitives (`malloc`/`free`, `Box`, `Arc`, `unsafe`), and control flow logic.
-   - **Hardware / EDA (Verilog, SystemVerilog, Floorplans)**: Register transfer level (RTL) logic, instruction decode cases, ALU pipelines, port mappings, and macro placement coordinates.
-   - **CAD / 3D Models (FreeCAD, STL, STEP, OBJ)**: Parametric features (extrusions, fillets, chamfers) and mesh topology (vertex/face deltas, bounding box resizing).
+2. **Object Packing & Garbage Collection (`vcx gc`)**:
+   - Compressed archive storage (`.vcx/objects/pack/pack-<hash>.pack`) with high-speed indexed binary lookup (`.idx`).
+   - `vcx gc` identifies reachable objects from all branch heads, consolidates loose files into packfiles, and safely prunes unreferenced dangling objects to reclaim disk space.
+
+3. **Multi-Domain 3-Way Semantic Merge (`vcx merge <branch>`)**:
+   - **Hardware / EDA (Verilog/SystemVerilog & Floorplans)**: Synthesizes non-conflicting port additions, opcode decoders, and independent macro coordinate shifts without textual merge conflicts.
+   - **CAD / 3D Parametric (FreeCAD XML & STEP)**: Resolves independent parametric dimensions (e.g. branch A increases base extrusion while branch B adds an edge fillet). Detects true parametric collisions when identical dimensions collide.
+   - **Source Code (Python AST & Code)**: Combines non-colliding function and class declarations across branches.
+   - **Databases & Logs (CSV, Logs, SQLite)**: Synthesizes appended transaction streams and audit entries.
+
+4. **Domain-Aware Diff Analyzers**:
+   - **Source Code (Python, Rust, C, C++)**: AST function signatures, memory primitives (`malloc`/`free`, `Box`, `Arc`, `unsafe`), and control flow logic.
+   - **Hardware / EDA (Verilog, SystemVerilog, Floorplans)**: RTL control logic, instruction decode cases, ALU pipelines, port mappings, and macro placements.
+   - **CAD / 3D Models (FreeCAD, STL, STEP, OBJ)**: Parametric features and mesh topology (vertex/face deltas, bounding box resizing).
    - **Databases & Logs (SQLite, CSV, TSV)**: SQLite table schema shifts, column mutations, row count deltas, and appended audit logs.
    - **Binaries & Unknowns**: Factual file-system delta tracking (size deltas, entropy shifts) without hallucinations.
 
-3. **Core Semantic Differ Agent**:
+5. **Core Semantic Differ Agent**:
    - Autonomous background differ agent producing structured, human-readable commit messages, technical deltas, and inferred intent.
-   - Fully compliant with the strict VCX JSON input and output schemas.
+   - Strictly compliant with the VCX JSON input and output schemas.
    - Works offline with a deterministic heuristic engine and supports Gemini API integration (`GEMINI_API_KEY`).
 
-4. **Autonomous Workspace Watcher (`vcx watch`)**:
+6. **Autonomous Workspace Watcher (`vcx watch`)**:
    - Real-time Linux `pyinotify` monitoring with configurable debouncing.
-   - Optional `--auto-commit` mode to checkpoint workspace iterations continuously into the VCX commit graph.
+   - Optional `--auto-commit` mode to batch debounced changes and checkpoint workspace iterations continuously into the VCX commit graph.
 
 ---
 
@@ -53,7 +62,7 @@ vcx --help
 
 ---
 
-## Quick Start CLI Usage
+## CLI Reference & Usage
 
 ### 1. Initialize a Repository
 ```bash
@@ -63,44 +72,61 @@ vcx init
 ### 2. Stage Files and Check Status
 ```bash
 vcx status
-vcx add alu.v chassis.fcstd market.db
+vcx add src/ cad/ market.db
 vcx status
 ```
 
-### 3. Commit Changes with Semantic Commit Messages
-Manual commit:
+### 3. Commit Changes
 ```bash
-vcx commit -m "Add initial hardware and mechanical models"
-```
-Or use the **Semantic Differ Agent** to automatically infer the commit message and technical delta:
-```bash
+# Manual commit
+vcx commit -m "Initialize hardware ALU and chassis baseline"
+
+# Or use the Semantic Differ Agent to generate messages & deltas automatically:
 vcx commit --auto
 ```
 
-### 4. Inspect Semantic Diffs
-View domain-aware JSON diff payload:
+### 4. Branching and Checkout
 ```bash
-vcx diff --semantic
+# List branches (* indicates current active branch)
+vcx branch
+
+# Create a new branch
+vcx branch feature-chip
+
+# Switch branches
+vcx checkout feature-chip
 ```
 
-### 5. View Commit History
+### 5. Multi-Domain 3-Way Semantic Merge
+Merge a branch into the current branch with automatic domain conflict resolution:
+```bash
+vcx checkout main
+vcx merge feature-chip
+```
+
+### 6. Pack Objects and Run Garbage Collection
+Pack loose files into a compressed `.pack` archive and prune unreachable objects:
+```bash
+vcx gc
+```
+
+### 7. View Commit History
 ```bash
 vcx log
 # Or structured JSON history:
 vcx log --json
 ```
 
-### 6. Run the Autonomous File Watcher
+### 8. Run the Autonomous File Watcher
 ```bash
-# Watch for workspace changes and stream semantic diffs
+# Live stream semantic diffs to terminal on save:
 vcx watch
 
-# Automatically commit every debounced modification
+# Automatically commit every debounced modification batch:
 vcx watch --auto-commit --debounce 0.8
 ```
 
-### 7. Run Semantic Differ Agent Directly (CLI / CI Integration)
-Pipe an input JSON payload directly:
+### 9. Run Semantic Differ Agent Directly (CI / Tool Pipeline)
 ```bash
 echo '{
   "file_name": "riscv_alu.v",
@@ -135,5 +161,6 @@ Outputs strictly valid JSON:
 Execute the unit tests:
 
 ```bash
-python3 -m unittest discover tests
+python3 -m unittest discover tests -v
 ```
+*(40 tests passing with 100% success rate)*
