@@ -64,6 +64,7 @@ Traditional version control systems like Git were built primarily for flat ASCII
 | **Documents & Office Suites** | PDF, Word (`.docx`), Excel (`.xlsx`), PowerPoint (`.pptx`) | Binary collisions; unreadable raw XML diffs | **Document Structure Inspection**: extracts word counts, spreadsheet sheets, slide counts, revision history, and PDF page counts. |
 | **Databases & Event Streams** | SQLite (`.db`, `.sqlite`), CSV, TSV, Transaction Logs | Corrupt index merges; binary diff blobs | **Schema & Row-Level Delta Tracking**: diffs table definitions, column types, row counts, and auto-synthesizes appended audit logs. |
 | **Autonomous AI Agents** | Automated Agent Pipelines, CI/CD, Robotics | Hallucinatory commit messages and fragile tools | **Deterministic Differ Agent**: operates offline or with Gemini API, strictly adhering to JSON schemas with zero hallucinations. |
+| **Universal Applications & DAWs** | Ableton (`.als`), Reaper (`.rpp`), Unity, Godot, Unreal, Sketch, Krita, KiCad | Incompatible proprietary binaries; silent data corruption | **Universal Container & CDC Dissector**: unpacks project containers in memory, performs Content-Defined Chunking (CDC) on proprietary binaries, extracts embedded strings, and exposes custom plugin hooks. |
 
 ---
 
@@ -329,6 +330,7 @@ vcx watch --auto-commit --debounce 0.8
 | **`vcx serve`** | `--host <h>`, `--port <p>` | Start lightweight HTTP server daemon for smart network transport |
 | **`vcx watch`** | `--auto-commit`, `--debounce <sec>` | Monitor workspace using `pyinotify` and live-stream semantic deltas |
 | **`vcx agent`** | `--input <file>` | Invoke Semantic Differ Agent directly with JSON payload |
+| **`vcx app`** | `inspect <file> \| list` | Inspect any software's project file or catalog the universal application ecosystem |
 | **`vcx import-git`** | `[path] [--semantic]` | Convert an existing Git repository into native VCX Merkle CAS |
 
 ---
@@ -394,8 +396,21 @@ test_repository_branch_and_merge_workflow (test_semantic_merge.TestSemanticMerge
 test_verilog_eda_semantic_merge (test_semantic_merge.TestSemanticMerge) ... ok
 test_watcher_detects_and_analyzes (test_watcher.TestWorkspaceWatcher) ... ok
 
+test_ableton_live_als_project (test_universal_apps.TestUniversalApps) ... ok
+test_apache_parquet_detection (test_universal_apps.TestUniversalApps) ... ok
+test_autocad_dxf (test_universal_apps.TestUniversalApps) ... ok
+test_custom_plugin_registration (test_universal_apps.TestUniversalApps) ... ok
+test_godot_scene (test_universal_apps.TestUniversalApps) ... ok
+test_kicad_pcb_eda (test_universal_apps.TestUniversalApps) ... ok
+test_krita_painting_file (test_universal_apps.TestUniversalApps) ... ok
+test_reaper_rpp_session (test_universal_apps.TestUniversalApps) ... ok
+test_sketch_design_file (test_universal_apps.TestUniversalApps) ... ok
+test_unity_scene_and_prefab (test_universal_apps.TestUniversalApps) ... ok
+test_universal_binary_cdc_and_string_dissection (test_universal_apps.TestUniversalApps) ... ok
+test_universal_container_fallback_zip (test_universal_apps.TestUniversalApps) ... ok
+
 ----------------------------------------------------------------------
-Ran 49 tests in 1.381s
+Ran 73 tests in 1.832s
 
 OK
 ```

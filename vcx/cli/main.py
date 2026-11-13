@@ -545,6 +545,79 @@ def cmd_import_git(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_app(args: argparse.Namespace) -> int:
+    action = args.action
+    if action == "inspect":
+        if not args.target:
+            print("usage: vcx app inspect <file>", file=sys.stderr)
+            return 1
+        path = Path(args.target)
+        if not path.is_file():
+            print(f"error: file not found '{args.target}'", file=sys.stderr)
+            return 1
+        content = path.read_bytes()
+        f_type = detect_file_type(path, content)
+        engine = DeltaEngine()
+        payload = engine.analyze_change(path.name, None, content, forced_file_type=f_type)
+        agent = SemanticDifferAgent()
+        out = agent.analyze(payload.to_dict())
+
+        print(f"\033[1;36m=== VCX Universal Application Inspector ===\033[0m")
+        print(f"File Target:       {path.name}")
+        print(f"Detected Type:     \033[32m{f_type}\033[0m")
+        print(f"File Size:         {len(content):,} bytes")
+        if payload.domain_facts:
+            print(f"\n\033[1mExtracted Application Facts:\033[0m")
+            for k, v in payload.domain_facts.items():
+                print(f"  * {k}: {v}")
+        print(f"\n\033[1mSemantic Differ Output:\033[0m")
+        print(f"  Action Summary:  \033[33m{out.action_summary}\033[0m")
+        print(f"  Inferred Intent: {out.inferred_intent}")
+        print(f"  Tags:            {', '.join(out.tags)}")
+        if out.technical_delta:
+            print(f"  Technical Delta:")
+            for d in out.technical_delta:
+                print(f"    * {d}")
+        return 0
+
+    elif action == "list":
+        engine = DeltaEngine()
+        plugins = engine.plugin_manager.list_all_plugins()
+
+        print("\033[1;36m=== VCX Universal Application Ecosystem ===\033[0m")
+        print("VCX operates with all applications and software in the world via:")
+        print("  1. Native Domain Analyzers (Code, Media, Creative Suites, CAD, EDA)")
+        print("  2. Container & Scene Graph Unpackers (DAWs, Game Engines, Design, Office)")
+        print("  3. Universal Binary CDC Dissector (Content-Defined Chunking, Strings, Entropy)")
+        print("  4. Dynamic Plugins (.vcx/plugins/, .vcx/config.json, Python hooks)\n")
+
+        categories = [
+            ("Video & Motion", "Premiere (.prproj), Final Cut (.fcpxml), DaVinci (.drp/.edl), MP4, MOV, ProRes"),
+            ("Audio & DAWs", "Ableton Live (.als), Reaper (.rpp), FL Studio (.flp), Logic Pro, WAV, FLAC"),
+            ("Game Engines", "Unity (.unity/.prefab), Godot (.tscn/.tres), Unreal Engine (.uproject/.uasset)"),
+            ("Graphic & UI/UX", "Photoshop (.psd/.psb), Blender (.blend), Sketch (.sketch), Krita (.kra), GIMP (.xcf), Figma"),
+            ("CAD & Engineering", "AutoCAD (.dwg/.dxf), FreeCAD (.fcstd), SolidWorks, KiCad (.kicad_pcb), Eagle (.brd)"),
+            ("Data & Scientific", "Apache Parquet (.parquet), HDF5 (.h5), SQLite (.db), NetCDF (.nc), CSV"),
+            ("Documents & Office", "Office Word (.docx), Excel (.xlsx), PowerPoint (.pptx), PDF, Pages, Keynote"),
+            ("Systems & Binaries", "ELF, Mach-O, Windows PE/COFF, WebAssembly (.wasm), Java Class, 7-Zip, RAR"),
+            ("Source & Hardware", "Rust, Python, C/C++, TypeScript, Go, SystemVerilog, Verilog, JSON Floorplans"),
+        ]
+        for cat, details in categories:
+            print(f"  \033[1;32m{cat:<20}\033[0m {details}")
+
+        if plugins:
+            print(f"\n\033[1mActive Custom Plugins ({len(plugins)}):\033[0m")
+            for p in plugins:
+                print(f"  * [{p['type']}] {p.get('name')} -> {p.get('target') or p.get('path') or p.get('patterns')}")
+        else:
+            print("\nActive Custom Plugins: None (drop scripts in .vcx/plugins/ or configure in .vcx/config.json)")
+        return 0
+
+    else:
+        print("usage: vcx app [inspect <file> | list]", file=sys.stderr)
+        return 1
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="vcx",
@@ -674,6 +747,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_import.add_argument("path", nargs="?", default=".", help="Path to Git repository directory")
     p_import.add_argument("--semantic", action="store_true", help="Enrich historical commits with VCX Semantic Differ Agent")
     p_import.set_defaults(func=cmd_import_git)
+
+    # app
+    p_app = subparsers.add_parser("app", help="Universal application inspection and ecosystem catalog")
+    p_app.add_argument("action", choices=["inspect", "list"], help="Action: 'inspect' a file or 'list' supported software")
+    p_app.add_argument("target", nargs="?", help="File path to inspect")
+    p_app.set_defaults(func=cmd_app)
 
     args = parser.parse_args(argv)
     return args.func(args)

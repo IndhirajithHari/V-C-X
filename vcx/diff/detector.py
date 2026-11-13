@@ -1,4 +1,18 @@
-"""File type detection for multi-domain version control covering code, hardware, CAD, media, creative apps, documents, and databases."""
+"""Universal file type detection for all software and applications in the world.
+
+Covers:
+- Media: Video, Audio, Motion, Spatial Audio, Images
+- Creative Suites: Premiere, Final Cut, DaVinci, Photoshop, Blender, Audacity, Filmcraft
+- Music DAWs: Ableton Live, Cockos Reaper, FL Studio, Logic Pro
+- Game Engines: Unity, Unreal Engine, Godot
+- Design & UI/UX: Sketch, Krita, GIMP, Figma, Affinity
+- CAD & Engineering: AutoCAD (DWG/DXF), FreeCAD, Rhino, SolidWorks, KiCad EDA
+- Big Data & Scientific: Apache Parquet, HDF5, NetCDF, DuckDB, SQLite
+- Systems & Compilers: ELF, Mach-O, Windows PE, WebAssembly, Java Bytecode
+- Office & Documents: PDF, Word, Excel, PowerPoint, EPUB, OpenDocument
+- Containers & Archives: ZIP, GZIP, 7-Zip, TAR, RAR
+- Pure Binary Fallback: Content-defined chunking (CDC) & entropy analysis
+"""
 
 from __future__ import annotations
 import gzip
@@ -9,21 +23,6 @@ from typing import Optional
 
 
 def detect_file_type(file_path: Path | str, content: Optional[bytes] = None) -> str:
-    """Classify file into standard VCX domain file types:
-
-    - Video: video/mp4, video/mov, video/mkv, video/webm, video/avi, video/generic
-    - Audio: audio/wav, audio/mp3, audio/flac, audio/aac, audio/ogg, audio/generic
-    - Image: image/png, image/jpeg, image/webp, image/svg, image/tiff, image/generic
-    - Creative Apps: creative/premiere, creative/fcpxml, creative/davinci, creative/photoshop,
-                     creative/blender, creative/audacity, creative/filmcraft, creative/gltf, creative/generic
-    - Hardware / EDA: eda/verilog, eda/systemverilog, eda/floorplan
-    - CAD / 3D: cad/freecad, cad/stl, cad/step, cad/obj
-    - Source: source/rust, source/c, source/cpp, source/python, source/generic
-    - Database / Logs: database/sqlite, database/csv, log/generic
-    - Documents / Office: document/pdf, document/office, text/plain
-    - Archives: archive/zip, archive/tar, archive/generic
-    - Binary Fallback: binary/unknown
-    """
     path = Path(file_path)
     name = path.name.lower()
     suffix = path.suffix.lower()
@@ -56,7 +55,7 @@ def detect_file_type(file_path: Path | str, content: Optional[bytes] = None) -> 
     if suffix in (".aif", ".aiff", ".wma", ".mid", ".midi"):
         return "audio/generic"
 
-    # 3. Creative Apps & Video/Audio Editing Projects
+    # 3. Creative Apps & Video/Audio Suites
     if suffix in (".prproj",):
         return "creative/premiere"
     if suffix in (".fcpxml", ".fcpxmld"):
@@ -76,7 +75,39 @@ def detect_file_type(file_path: Path | str, content: Optional[bytes] = None) -> 
     if suffix in (".fbx", ".dae", ".usdz", ".abc"):
         return "creative/generic"
 
-    # 4. Raster & Vector Images
+    # 4. Music DAWs
+    if suffix in (".als",):
+        return "music/ableton"
+    if suffix in (".rpp",):
+        return "music/reaper"
+    if suffix in (".flp",):
+        return "music/flstudio"
+    if suffix in (".logicx", ".cpr"):
+        return "music/generic"
+
+    # 5. Game Engines & Interactive 3D
+    if suffix in (".unity", ".prefab", ".mat", ".asset", ".unitypackage"):
+        return "game/unity"
+    if suffix in (".uproject", ".uasset", ".umap"):
+        return "game/unreal"
+    if suffix in (".tscn", ".tres", ".godot"):
+        return "game/godot"
+
+    # 6. Design, UI/UX & Digital Painting
+    if suffix in (".sketch",):
+        return "design/sketch"
+    if suffix in (".kra",):
+        return "design/krita"
+    if suffix in (".xcf",):
+        return "design/gimp"
+    if suffix in (".fig",):
+        return "design/figma"
+    if suffix in (".afdesign", ".afphoto", ".afpublisher"):
+        return "design/affinity"
+    if suffix in (".cdr", ".indd", ".idml"):
+        return "design/generic"
+
+    # 7. Raster & Vector Images
     if suffix in (".png",):
         return "image/png"
     if suffix in (".jpg", ".jpeg", ".jpe"):
@@ -90,27 +121,7 @@ def detect_file_type(file_path: Path | str, content: Optional[bytes] = None) -> 
     if suffix in (".gif", ".bmp", ".ico", ".raw", ".cr2", ".nef", ".arw", ".exr", ".hdr"):
         return "image/generic"
 
-    # 5. Documents & Office
-    if suffix in (".pdf",):
-        return "document/pdf"
-    if suffix in (".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp", ".rtf"):
-        return "document/office"
-
-    # 6. Archives & Containers
-    if suffix in (".zip",):
-        return "archive/zip"
-    if suffix in (".tar", ".gz", ".tgz", ".bz2", ".xz", ".7z", ".rar", ".iso", ".dmg"):
-        return "archive/generic"
-
-    # 7. Hardware / EDA
-    if suffix in (".v", ".vh"):
-        return "eda/verilog"
-    if suffix in (".sv", ".svh"):
-        return "eda/systemverilog"
-    if suffix in (".def", ".lef") or "floorplan" in name or "placement" in name:
-        return "eda/floorplan"
-
-    # 8. CAD / 3D Models
+    # 8. CAD & Architecture
     if suffix in (".fcstd", ".fcmacro"):
         return "cad/freecad"
     if suffix == ".stl":
@@ -119,8 +130,52 @@ def detect_file_type(file_path: Path | str, content: Optional[bytes] = None) -> 
         return "cad/step"
     if suffix == ".obj":
         return "cad/obj"
+    if suffix in (".dwg",):
+        return "cad/dwg"
+    if suffix in (".dxf",):
+        return "cad/dxf"
+    if suffix in (".3dm", ".skp", ".sldprt", ".sldasm", ".f3d"):
+        return "cad/generic"
 
-    # 9. Source Code
+    # 9. Hardware / EDA
+    if suffix in (".v", ".vh"):
+        return "eda/verilog"
+    if suffix in (".sv", ".svh"):
+        return "eda/systemverilog"
+    if suffix in (".def", ".lef") or "floorplan" in name or "placement" in name:
+        return "eda/floorplan"
+    if suffix in (".kicad_pcb", ".kicad_sch", ".kicad_pro"):
+        return "eda/kicad"
+    if suffix in (".brd", ".sch"):
+        return "eda/eagle"
+
+    # 10. Data Science & Big Data
+    if suffix in (".parquet",):
+        return "database/parquet"
+    if suffix in (".h5", ".hdf5", ".nc"):
+        return "scientific/hdf5"
+    if suffix in (".sqlite", ".sqlite3", ".db"):
+        return "database/sqlite"
+    if suffix in (".csv", ".tsv"):
+        return "database/csv"
+    if suffix in (".log", ".jsonl"):
+        return "log/generic"
+
+    # 11. Documents & Office
+    if suffix in (".pdf",):
+        return "document/pdf"
+    if suffix in (".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp", ".rtf", ".pages", ".key", ".numbers"):
+        return "document/office"
+
+    # 12. Archives & Containers
+    if suffix in (".zip",):
+        return "archive/zip"
+    if suffix in (".7z",):
+        return "archive/7z"
+    if suffix in (".tar", ".gz", ".tgz", ".bz2", ".xz", ".rar", ".iso", ".dmg"):
+        return "archive/generic"
+
+    # 13. Source Code
     if suffix in (".rs",):
         return "source/rust"
     if suffix in (".c", ".h"):
@@ -132,19 +187,11 @@ def detect_file_type(file_path: Path | str, content: Optional[bytes] = None) -> 
     if suffix in (".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".scala", ".rb", ".php", ".cs", ".swift", ".kt", ".dart", ".zig"):
         return "source/generic"
 
-    # 10. Database / Structured Logs
-    if suffix in (".sqlite", ".sqlite3", ".db"):
-        return "database/sqlite"
-    if suffix in (".csv", ".tsv"):
-        return "database/csv"
-    if suffix in (".log", ".jsonl"):
-        return "log/generic"
-
-    # 11. Plaintext & Configs
+    # 14. Plaintext & Configs
     if suffix in (".md", ".txt", ".rst", ".yaml", ".yml", ".toml", ".ini", ".conf", ".cfg", ".json", ".xml", ".html", ".css", ".sh"):
         return "text/plain"
 
-    # 12. Magic bytes content sniffing
+    # 15. Magic bytes content sniffing
     raw = content
     if raw is None and path.is_file():
         try:
@@ -166,19 +213,41 @@ def detect_file_type(file_path: Path | str, content: Optional[bytes] = None) -> 
         if raw.startswith(b"glTF"):
             return "creative/gltf"
 
-        # SQLite format (Database or Audacity project)
+        # GIMP XCF
+        if raw.startswith(b"gimp xcf"):
+            return "design/gimp"
+
+        # AutoCAD DWG
+        if raw.startswith(b"AC10"):
+            return "cad/dwg"
+
+        # Apache Parquet
+        if raw.startswith(b"PAR1"):
+            return "database/parquet"
+
+        # HDF5
+        if raw.startswith(b"\x89HDF\r\n\x1a\n"):
+            return "scientific/hdf5"
+
+        # 7-Zip
+        if raw.startswith(b"7z\xbc\xaf\x27\x1c"):
+            return "archive/7z"
+
+        # SQLite format (Database, Audacity, or app project)
         if raw.startswith(b"SQLite format 3\000"):
             if "aup3" in name:
                 return "creative/audacity"
             return "database/sqlite"
 
-        # Gzip container (Could be Premiere .prproj or SVGZ)
+        # Gzip container (Premiere, Ableton, or SVGZ)
         if raw.startswith(b"\x1f\x8b"):
             try:
                 with gzip.GzipFile(fileobj=io.BytesIO(raw)) as gz:
                     header_decomp = gz.read(256)
                     if b"PremiereData" in header_decomp or b"ProjectItem" in header_decomp:
                         return "creative/premiere"
+                    if b"<Ableton" in header_decomp:
+                        return "music/ableton"
             except Exception:
                 pass
             return "archive/generic"
@@ -228,12 +297,34 @@ def detect_file_type(file_path: Path | str, content: Optional[bytes] = None) -> 
         if raw.startswith(b"\x1a\x45\xdf\xa3"):
             return "video/mkv"
 
-        # ZIP containers (ZIP, DOCX, XLSX, PPTX, FreeCAD)
+        # Executables & Binaries
+        if raw.startswith(b"\x7fELF"):
+            return "binary/elf"
+        if raw.startswith((b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe")):
+            return "binary/macho"
+        if raw.startswith(b"MZ"):
+            return "binary/pe"
+        if raw.startswith(b"\x00asm"):
+            return "binary/wasm"
+
+        # ZIP containers (Office, Sketch, Krita, FreeCAD, APK, JAR, ZIP)
         if raw.startswith(b"PK\x03\x04"):
+            if "sketch" in suffix or "sketch" in name:
+                return "design/sketch"
+            if "kra" in suffix:
+                return "design/krita"
+            if "fcstd" in suffix:
+                return "cad/freecad"
             return "archive/zip"
 
         # Text check
         if b"\0" not in raw[:1024]:
+            if b"<REAPER_PROJECT" in raw[:1024]:
+                return "music/reaper"
+            if b"%YAML" in raw[:256] and b"!u!" in raw[:1024]:
+                return "game/unity"
+            if b"[gd_scene" in raw[:256] or b"[gd_resource" in raw[:256]:
+                return "game/godot"
             return "text/plain"
 
         return "binary/unknown"

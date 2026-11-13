@@ -87,46 +87,67 @@ class SemanticDifferAgent:
         prev_meta = payload.previous_metadata or {}
         curr_meta = payload.current_metadata or {}
         vision_summary = payload.vision_summary or ""
+        facts = payload.domain_facts or {}
 
-        # 1. HARDWARE / EDA (Verilog, SystemVerilog, JSON Floorplans)
+        # 0. CUSTOM PLUGINS
+        if file_type == "plugin/custom":
+            return self._analyze_plugin_change(file_name, file_type, raw_diff, prev_meta, curr_meta, facts)
+
+        # 1. MUSIC DAWS & AUDIO PRODUCTION (Ableton, Reaper, FL Studio)
+        if file_type.startswith("music/"):
+            return self._analyze_music_change(file_name, file_type, raw_diff, prev_meta, curr_meta, facts)
+
+        # 2. GAME ENGINES & INTERACTIVE 3D (Unity, Godot, Unreal)
+        if file_type.startswith("game/"):
+            return self._analyze_game_change(file_name, file_type, raw_diff, prev_meta, curr_meta, facts)
+
+        # 3. DESIGN, UI/UX & DIGITAL ART (Sketch, Krita, GIMP, Figma)
+        if file_type.startswith("design/"):
+            return self._analyze_design_change(file_name, file_type, raw_diff, prev_meta, curr_meta, facts)
+
+        # 4. BIG DATA & SCIENTIFIC (Parquet, HDF5)
+        if file_type.startswith("scientific/") or file_type == "database/parquet":
+            return self._analyze_scientific_change(file_name, file_type, raw_diff, prev_meta, curr_meta, facts)
+
+        # 5. HARDWARE / EDA (Verilog, SystemVerilog, KiCad, JSON Floorplans)
         if file_type.startswith("eda/"):
             return self._analyze_hardware_change(
-                file_name, file_type, raw_diff, prev_meta, curr_meta
+                file_name, file_type, raw_diff, prev_meta, curr_meta, facts
             )
 
-        # 2. CAD / 3D MODELS (FreeCAD, STL, STEP)
+        # 6. CAD / 3D MODELS (FreeCAD, DXF, DWG, STL, STEP)
         if file_type.startswith("cad/"):
             return self._analyze_cad_change(
-                file_name, file_type, raw_diff, prev_meta, curr_meta, vision_summary
+                file_name, file_type, raw_diff, prev_meta, curr_meta, vision_summary, facts
             )
 
-        # 3. DATABASES / LOGS (SQLite, CSV)
+        # 7. DATABASES / LOGS (SQLite, CSV)
         if file_type.startswith("database/") or file_type.startswith("log/"):
             return self._analyze_database_change(
                 file_name, file_type, raw_diff, prev_meta, curr_meta
             )
 
-        # 4. MULTIMEDIA (Video, Audio, Images)
+        # 8. MULTIMEDIA (Video, Audio, Images)
         if file_type.startswith("video/") or file_type.startswith("audio/") or file_type.startswith("image/"):
             return self._analyze_media_change(
                 file_name, file_type, raw_diff, prev_meta, curr_meta, vision_summary
             )
 
-        # 5. CREATIVE APPS & PROJECTS (Premiere, Resolve, Photoshop, Blender, Office)
+        # 9. CREATIVE APPS & PROJECTS (Premiere, Resolve, Photoshop, Blender, Office)
         if file_type.startswith("creative/") or file_type.startswith("document/") or file_type.startswith("archive/"):
             return self._analyze_creative_change(
                 file_name, file_type, raw_diff, prev_meta, curr_meta, vision_summary
             )
 
-        # 6. SOURCE CODE (Python, Rust, C, C++)
+        # 10. SOURCE CODE (Python, Rust, C, C++)
         if file_type.startswith("source/"):
             return self._analyze_code_change(
                 file_name, file_type, raw_diff, prev_meta, curr_meta
             )
 
-        # 7. BINARY / UNKNOWN (File-system level factual analysis)
+        # 11. UNIVERSAL BINARY / CDC / UNKNOWN (File-system level factual analysis)
         return self._analyze_binary_change(
-            file_name, file_type, raw_diff, prev_meta, curr_meta
+            file_name, file_type, raw_diff, prev_meta, curr_meta, facts
         )
 
     def _analyze_hardware_change(
@@ -136,10 +157,21 @@ class SemanticDifferAgent:
         raw_diff: str,
         prev_meta: Any,
         curr_meta: Any,
+        facts: Optional[Dict[str, Any]] = None,
     ) -> DifferOutput:
         delta_points: List[str] = []
         tags = ["eda-hardware"]
         mod_name = file_name.split(".")[0]
+
+        if file_type in ("eda/kicad", "eda/eagle"):
+            tags.extend(["kicad", "pcb-layout"])
+            nets = (facts or {}).get("nets_count", 0)
+            fps = (facts or {}).get("footprints_count", 0)
+            layers = (facts or {}).get("layers_count", 0)
+            delta_points.append(f"KiCad PCB layout: {fps} footprints, {nets} electrical nets, {layers} layers")
+            action = f"Update KiCad PCB layout {file_name}"[:49]
+            intent = "Update schematic netlist routing and board component placement."
+            return DifferOutput(action, delta_points, intent, tags)
 
         # Check for ALU / Pipeline changes
         is_alu = bool(re.search(r"alu|arithmetic|logic|pipeline|stage", file_name, re.I))
@@ -201,6 +233,7 @@ class SemanticDifferAgent:
         prev_meta: Any,
         curr_meta: Any,
         vision_summary: str,
+        facts: Optional[Dict[str, Any]] = None,
     ) -> DifferOutput:
         delta_points: List[str] = []
         tags = ["cad-geometry"]
@@ -219,6 +252,21 @@ class SemanticDifferAgent:
             delta_points.append(f"Increased base extrusion thickness by {t}mm")
             action = f"Increase base extrusion thickness by {t}mm"[:49]
             tags.append("extrusion")
+        elif file_type == "cad/freecad":
+            tags.extend(["freecad", "parametric-cad"])
+            objs = (facts or {}).get("objects_count", 0)
+            delta_points.append(f"FreeCAD model: {objs} geometric features & bodies")
+            action = f"Update FreeCAD model {file_name}"[:49]
+            intent = "Update parametric 3D body tree and sketch constraints."
+            return DifferOutput(action, delta_points, intent, tags)
+        elif file_type in ("cad/dwg", "cad/dxf"):
+            tags.extend(["autocad", "vector-cad"])
+            ents = (facts or {}).get("entities_count", 0)
+            layers = len((facts or {}).get("layers", []))
+            delta_points.append(f"AutoCAD drawing: {ents} entities across {layers} layers")
+            action = f"Update CAD drawing {file_name}"[:49]
+            intent = "Update 2D/3D drafting entities and layer geometries."
+            return DifferOutput(action, delta_points, intent, tags)
         else:
             # Check mesh stats
             if isinstance(curr_meta, dict) and "mesh_stats" in curr_meta:
@@ -237,6 +285,7 @@ class SemanticDifferAgent:
             delta_points.append(f"Viewport analysis: {vision_summary}")
 
         intent = "Fulfill mechanical packaging tolerances and structural load requirements."
+        return DifferOutput(action, delta_points, intent, tags)
         return DifferOutput(action, delta_points, intent, tags)
 
     def _analyze_database_change(
@@ -364,6 +413,7 @@ class SemanticDifferAgent:
         raw_diff: str,
         prev_meta: Any,
         curr_meta: Any,
+        facts: Optional[Dict[str, Any]] = None,
     ) -> DifferOutput:
         delta_points: List[str] = []
         tags = ["binary", "file-system"]
@@ -385,17 +435,219 @@ class SemanticDifferAgent:
             size_msg = f"File size {verb} by {abs(delta)} bytes"
 
         delta_points.append(size_msg)
+
+        facts = facts or {}
+        mutation = facts.get("mutation_percentage")
+        similarity = facts.get("similarity_ratio")
+        added_strings = facts.get("added_strings", [])
+        sig = facts.get("format_signature")
+
+        if sig and sig not in ("Generic Binary", "Empty"):
+            tags.append(sig.split()[0].lower())
+            delta_points.append(f"Format signature: {sig}")
+
+        if mutation is not None and similarity is not None:
+            delta_points.append(f"Binary mutation: {mutation:.1f}% changed (similarity: {similarity:.1%})")
+
+        if added_strings:
+            delta_points.append(f"Extracted symbols: {', '.join(added_strings[:3])}")
+
         if isinstance(curr_meta, dict) and "entropy" in curr_meta:
             delta_points.append(f"Recorded binary entropy at {curr_meta['entropy']:.2f}")
 
-        action = f"Update {file_name} ({size_msg})"
+        if mutation is not None and mutation > 0:
+            action = f"Update {file_name} ({mutation:.1f}% mutated)"
+        else:
+            action = f"Update {file_name} ({size_msg})"
         if len(action) >= 50:
             short_msg = f"+{mb:.0f}MB" if abs(delta) >= 1024 * 1024 else f"{delta:+d}B"
             action = f"Update {file_name} ({short_msg})"
         if len(action) >= 50:
             action = f"Update {file_name} binary"[:49]
 
-        intent = "Update compiled artifact and binary asset."
+        intent = "Update compiled artifact, asset blocks, and binary data."
+        return DifferOutput(action, delta_points, intent, tags)
+
+    def _analyze_plugin_change(
+        self,
+        file_name: str,
+        file_type: str,
+        raw_diff: str,
+        prev_meta: Any,
+        curr_meta: Any,
+        facts: Optional[Dict[str, Any]] = None,
+    ) -> DifferOutput:
+        delta_points: List[str] = []
+        tags = ["plugin", "custom-adapter"]
+        first_line = raw_diff.splitlines()[0] if raw_diff else f"Updated {file_name}"
+        delta_points.append(first_line[:80])
+        action = f"Update {file_name} via plugin"[:49]
+        intent = "Apply external application adapter transformation."
+        return DifferOutput(action, delta_points, intent, tags)
+
+    def _analyze_music_change(
+        self,
+        file_name: str,
+        file_type: str,
+        raw_diff: str,
+        prev_meta: Any,
+        curr_meta: Any,
+        facts: Optional[Dict[str, Any]] = None,
+    ) -> DifferOutput:
+        delta_points: List[str] = []
+        tags = ["music-production", "daw"]
+        facts = facts or {}
+        daw = facts.get("daw", "DAW")
+        bpm = facts.get("tempo_bpm") or facts.get("bpm")
+        tracks = facts.get("tracks_count", 0)
+        track_names = facts.get("track_names", [])
+
+        if "ableton" in file_type or daw == "Ableton Live":
+            tags.extend(["ableton-live", "electronic-music"])
+            action = f"Update Ableton Live project {file_name}"[:49]
+            intent = "Refine electronic arrangement, stems, and MIDI clips."
+        elif "reaper" in file_type or daw == "Cockos Reaper":
+            tags.extend(["reaper", "multitrack"])
+            action = f"Update Reaper session {file_name}"[:49]
+            intent = "Update audio stems, markers, and plugin routings."
+        else:
+            tags.append("audio-composition")
+            action = f"Update DAW project {file_name}"[:49]
+            intent = "Adjust musical arrangement and audio track stems."
+
+        if bpm:
+            delta_points.append(f"Project tempo: {bpm} BPM")
+        if tracks:
+            delta_points.append(f"Session tracks: {tracks} active tracks")
+        if track_names:
+            delta_points.append(f"Arrangement stems: {', '.join(track_names[:3])}")
+        if not delta_points:
+            delta_points.append(f"Updated music composition in {file_name}")
+
+        return DifferOutput(action, delta_points, intent, tags)
+
+    def _analyze_game_change(
+        self,
+        file_name: str,
+        file_type: str,
+        raw_diff: str,
+        prev_meta: Any,
+        curr_meta: Any,
+        facts: Optional[Dict[str, Any]] = None,
+    ) -> DifferOutput:
+        delta_points: List[str] = []
+        tags = ["game-development", "interactive-3d"]
+        facts = facts or {}
+        engine = facts.get("engine", "Game Engine")
+
+        if "unity" in file_type or engine == "Unity":
+            tags.extend(["unity", "scene-graph"])
+            action = f"Update Unity scene {file_name}"[:49]
+            gos = facts.get("game_objects_count", 0)
+            comps = facts.get("components_count", 0)
+            if gos or comps:
+                delta_points.append(f"Unity hierarchy: {gos} GameObjects, {comps} Components")
+            if facts.get("object_names"):
+                delta_points.append(f"Entities: {', '.join(facts['object_names'][:3])}")
+            intent = "Update scene graph hierarchy and game component configurations."
+        elif "godot" in file_type or engine == "Godot":
+            tags.extend(["godot", "scene-tree"])
+            action = f"Update Godot scene {file_name}"[:49]
+            nodes = facts.get("nodes_count", 0)
+            root = facts.get("root_type", "Node")
+            delta_points.append(f"Godot scene tree: {nodes} nodes (Root: {root})")
+            if facts.get("node_types"):
+                delta_points.append(f"Node classes: {', '.join(facts['node_types'][:3])}")
+            intent = "Update game object nodes, spatial transforms, and script bindings."
+        elif "unreal" in file_type or engine == "Unreal Engine":
+            tags.extend(["unreal-engine", "uasset"])
+            action = f"Update Unreal project {file_name}"[:49]
+            v = facts.get("version", "")
+            if v:
+                delta_points.append(f"Unreal Engine version association: {v}")
+            plugins = facts.get("plugins", [])
+            if plugins:
+                delta_points.append(f"Active modules/plugins: {', '.join(plugins[:3])}")
+            intent = "Update engine plugins, gameplay modules, and asset targets."
+        else:
+            action = f"Update game asset {file_name}"[:49]
+            delta_points.append("Updated game engine asset resources")
+            intent = "Update interactive game assets and level components."
+
+        if not delta_points:
+            delta_points.append(f"Updated {engine} project data")
+
+        return DifferOutput(action, delta_points, intent, tags)
+
+    def _analyze_design_change(
+        self,
+        file_name: str,
+        file_type: str,
+        raw_diff: str,
+        prev_meta: Any,
+        curr_meta: Any,
+        facts: Optional[Dict[str, Any]] = None,
+    ) -> DifferOutput:
+        delta_points: List[str] = []
+        tags = ["ui-ux", "graphic-design"]
+        facts = facts or {}
+        tool = facts.get("design_tool", "Design")
+
+        if "sketch" in file_type or tool == "Sketch":
+            tags.extend(["sketch", "artboards"])
+            action = f"Update Sketch artboards {file_name}"[:49]
+            pages = facts.get("pages_count", 0)
+            abs_list = facts.get("artboards", [])
+            delta_points.append(f"Sketch document: {pages} pages, {len(abs_list)} artboards")
+            if abs_list:
+                delta_points.append(f"Artboards: {', '.join(abs_list[:3])}")
+            intent = "Refine UI wireframes, design components, and design system tokens."
+        elif "krita" in file_type or tool == "Krita":
+            tags.extend(["krita", "digital-painting"])
+            action = f"Update Krita artwork {file_name}"[:49]
+            w, h = facts.get("width"), facts.get("height")
+            layers = facts.get("layers_count", 0)
+            if w and h:
+                delta_points.append(f"Canvas resolution: {w}x{h}")
+            if layers:
+                delta_points.append(f"Painting layers: {layers} layers")
+            intent = "Refine digital painting layers, brushes, and color values."
+        elif "gimp" in file_type:
+            tags.extend(["gimp", "raster"])
+            action = f"Update GIMP composition {file_name}"[:49]
+            delta_points.append("Updated GIMP multi-layer composition")
+            intent = "Update image editing layers and raster masks."
+        else:
+            action = f"Update design asset {file_name}"[:49]
+            delta_points.append("Updated design document assets")
+            intent = "Update visual graphics and vector layouts."
+
+        return DifferOutput(action, delta_points, intent, tags)
+
+    def _analyze_scientific_change(
+        self,
+        file_name: str,
+        file_type: str,
+        raw_diff: str,
+        prev_meta: Any,
+        curr_meta: Any,
+        facts: Optional[Dict[str, Any]] = None,
+    ) -> DifferOutput:
+        delta_points: List[str] = []
+        tags = ["data-science", "analytics"]
+        facts = facts or {}
+
+        if "parquet" in file_type:
+            tags.append("parquet")
+            action = f"Update Parquet dataset {file_name}"[:49]
+            delta_points.append("Updated Apache Parquet columnar table partitions")
+            intent = "Update analytical dataset records and columnar schemas."
+        else:
+            tags.append("scientific-computing")
+            action = f"Update scientific dataset {file_name}"[:49]
+            delta_points.append("Updated multidimensional arrays and scientific datasets")
+            intent = "Update experimental data arrays and observation matrices."
+
         return DifferOutput(action, delta_points, intent, tags)
 
     def _analyze_media_change(
