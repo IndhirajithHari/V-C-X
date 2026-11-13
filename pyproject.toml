@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vcx"
+version = "0.1.0"
+description = "VCX: Version Control for Everything - Multi-domain version control system with Semantic Differ Agent"
+authors = [
+    { name = "VCX Developers" }
+]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pyinotify>=0.9.6",
+    "trimesh>=4.0.0",
+    "numpy>=1.24.0",
+    "pyyaml>=6.0"
+]
+
+[project.scripts]
+vcx = "vcx.cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["vcx*"]

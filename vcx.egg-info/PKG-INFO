@@ -1,0 +1,12 @@
+Metadata-Version: 2.4
+Name: vcx
+Version: 0.1.0
+Summary: VCX: Version Control for Everything - Multi-domain version control system with Semantic Differ Agent
+Author: VCX Developers
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: pyinotify>=0.9.6
+Requires-Dist: trimesh>=4.0.0
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: pyyaml>=6.0
+Dynamic: requires-python
