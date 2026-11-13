@@ -7,8 +7,10 @@ from typing import Any, Dict, Optional
 
 from vcx.diff.analyzers.binary import BinaryAnalyzer
 from vcx.diff.analyzers.cad_3d import Cad3DAnalyzer
+from vcx.diff.analyzers.creative_app import CreativeAppAnalyzer
 from vcx.diff.analyzers.database_logs import DatabaseLogsAnalyzer
 from vcx.diff.analyzers.eda_hardware import EdaHardwareAnalyzer
+from vcx.diff.analyzers.media import MediaAnalyzer
 from vcx.diff.analyzers.source_code import SourceCodeAnalyzer
 from vcx.diff.detector import detect_file_type
 
@@ -41,6 +43,8 @@ class DeltaEngine:
         self.eda_analyzer = EdaHardwareAnalyzer()
         self.cad_analyzer = Cad3DAnalyzer()
         self.db_analyzer = DatabaseLogsAnalyzer()
+        self.media_analyzer = MediaAnalyzer()
+        self.creative_analyzer = CreativeAppAnalyzer()
         self.binary_analyzer = BinaryAnalyzer()
 
     def analyze_change(
@@ -61,6 +65,10 @@ class DeltaEngine:
             result = self.eda_analyzer.analyze(old_content, new_content, file_name)
         elif file_type.startswith("cad/"):
             result = self.cad_analyzer.analyze(old_content, new_content, file_name)
+        elif file_type.startswith("media/") or file_type.startswith("video/") or file_type.startswith("audio/") or file_type.startswith("image/"):
+            result = self.media_analyzer.analyze(old_content, new_content, file_name)
+        elif file_type.startswith("creative/") or file_type.startswith("document/") or file_type.startswith("archive/"):
+            result = self.creative_analyzer.analyze(old_content, new_content, file_name)
         elif file_type.startswith("database/") or file_type.startswith("log/"):
             result = self.db_analyzer.analyze(old_content, new_content, file_name)
         else:

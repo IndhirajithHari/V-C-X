@@ -106,13 +106,25 @@ class SemanticDifferAgent:
                 file_name, file_type, raw_diff, prev_meta, curr_meta
             )
 
-        # 4. SOURCE CODE (Python, Rust, C, C++)
+        # 4. MULTIMEDIA (Video, Audio, Images)
+        if file_type.startswith("video/") or file_type.startswith("audio/") or file_type.startswith("image/"):
+            return self._analyze_media_change(
+                file_name, file_type, raw_diff, prev_meta, curr_meta, vision_summary
+            )
+
+        # 5. CREATIVE APPS & PROJECTS (Premiere, Resolve, Photoshop, Blender, Office)
+        if file_type.startswith("creative/") or file_type.startswith("document/") or file_type.startswith("archive/"):
+            return self._analyze_creative_change(
+                file_name, file_type, raw_diff, prev_meta, curr_meta, vision_summary
+            )
+
+        # 6. SOURCE CODE (Python, Rust, C, C++)
         if file_type.startswith("source/"):
             return self._analyze_code_change(
                 file_name, file_type, raw_diff, prev_meta, curr_meta
             )
 
-        # 5. BINARY / UNKNOWN (File-system level factual analysis)
+        # 7. BINARY / UNKNOWN (File-system level factual analysis)
         return self._analyze_binary_change(
             file_name, file_type, raw_diff, prev_meta, curr_meta
         )
@@ -385,3 +397,145 @@ class SemanticDifferAgent:
 
         intent = "Update compiled artifact and binary asset."
         return DifferOutput(action, delta_points, intent, tags)
+
+    def _analyze_media_change(
+        self,
+        file_name: str,
+        file_type: str,
+        raw_diff: str,
+        prev_meta: Any,
+        curr_meta: Any,
+        vision_summary: str,
+    ) -> DifferOutput:
+        delta_points: List[str] = []
+        tags: List[str] = ["multimedia"]
+
+        if file_type.startswith("video/"):
+            tags.extend(["video-production", file_type.split("/")[-1]])
+            res = f"{curr_meta.get('width')}x{curr_meta.get('height')}" if curr_meta.get("width") else None
+            fps = curr_meta.get("fps")
+            codec = curr_meta.get("video_codec") or "video"
+
+            if res:
+                delta_points.append(f"Video frame raster geometry: {res}")
+            if fps:
+                delta_points.append(f"Playback framerate: {fps} fps")
+            if curr_meta.get("duration_seconds"):
+                delta_points.append(f"Duration: {curr_meta.get('duration_seconds')}s")
+
+            action = f"Update {file_name} ({res or codec})"
+            if len(action) >= 50:
+                action = f"Update video stream {file_name}"[:49]
+            intent = "Update video render output and timeline master stream."
+
+        elif file_type.startswith("audio/"):
+            tags.extend(["audio-engineering", file_type.split("/")[-1]])
+            sr = curr_meta.get("sample_rate_hz")
+            ch = curr_meta.get("channels")
+            layout = "Stereo" if ch == 2 else ("Mono" if ch == 1 else f"{ch}ch")
+
+            if sr:
+                delta_points.append(f"Audio sampling rate: {sr} Hz")
+            if ch:
+                delta_points.append(f"Channel layout: {layout}")
+            if curr_meta.get("bit_depth"):
+                delta_points.append(f"Quantization bit depth: {curr_meta.get('bit_depth')}-bit")
+
+            action = f"Update audio master {file_name}"
+            if len(action) >= 50:
+                action = f"Update audio {file_name}"[:49]
+            intent = "Update master audio track and acoustic mix balance."
+
+        else:  # Image
+            tags.extend(["image-asset", file_type.split("/")[-1]])
+            w, h = curr_meta.get("width"), curr_meta.get("height")
+            fmt = curr_meta.get("format", "Image")
+            if w and h:
+                delta_points.append(f"Canvas resolution: {w}x{h}")
+            if curr_meta.get("mode"):
+                delta_points.append(f"Color profile mode: {curr_meta.get('mode')}")
+
+            action = f"Update {file_name} ({w}x{h})" if w and h else f"Update {file_name} image"
+            if len(action) >= 50:
+                action = f"Update image {file_name}"[:49]
+            intent = "Update visual graphics asset and raster texture."
+
+        if vision_summary and vision_summary not in delta_points:
+            delta_points.append(vision_summary)
+
+        return DifferOutput(action[:49], delta_points, intent, tags)
+
+    def _analyze_creative_change(
+        self,
+        file_name: str,
+        file_type: str,
+        raw_diff: str,
+        prev_meta: Any,
+        curr_meta: Any,
+        vision_summary: str,
+    ) -> DifferOutput:
+        delta_points: List[str] = []
+        tags: List[str] = ["creative-suite"]
+
+        if file_type == "creative/premiere":
+            tags.extend(["adobe-premiere", "nle-edit"])
+            seqs = curr_meta.get("sequences", [])
+            tracks = curr_meta.get("tracks", {})
+            if seqs:
+                delta_points.append(f"Active timeline sequences: {', '.join(seqs[:3])}")
+            if tracks:
+                delta_points.append(f"Track layout: {tracks.get('video_tracks', 0)} V-tracks, {tracks.get('audio_tracks', 0)} A-tracks")
+            action = f"Update Premiere edit timeline {file_name}"
+            intent = "Refine video sequence cuts, transitions, and track routing."
+
+        elif file_type == "creative/photoshop":
+            tags.extend(["photoshop", "layer-comp"])
+            w, h = curr_meta.get("width"), curr_meta.get("height")
+            mode = curr_meta.get("color_mode", "RGB")
+            if w and h:
+                delta_points.append(f"Photoshop canvas resolution: {w}x{h}")
+            if curr_meta.get("channels"):
+                delta_points.append(f"Color channels: {curr_meta.get('channels')} ({mode})")
+            action = f"Update Photoshop composition {file_name}"
+            intent = "Adjust graphic layout layers, color grading, and raster masks."
+
+        elif file_type == "creative/blender":
+            tags.extend(["blender-3d", "scene-graph"])
+            v = curr_meta.get("blender_version", "3D")
+            delta_points.append(f"Blender project version: {v}")
+            action = f"Update Blender 3D scene {file_name}"
+            intent = "Update 3D mesh assets, materials, and scene composition."
+
+        elif file_type == "creative/audacity":
+            tags.extend(["audacity", "multitrack"])
+            tracks = curr_meta.get("tracks", [])
+            delta_points.append(f"Multitrack session: {len(tracks)} audio channels")
+            action = f"Update Audacity audio session {file_name}"
+            intent = "Adjust audio track envelopes, stems, and multi-channel mix."
+
+        elif file_type.startswith("document/"):
+            tags.extend(["documentation", "office"])
+            if curr_meta.get("word_count"):
+                delta_points.append(f"Document volume: {curr_meta.get('word_count')} words")
+            if curr_meta.get("sheet_count"):
+                delta_points.append(f"Workbook sheets: {curr_meta.get('sheet_count')}")
+            if curr_meta.get("slide_count"):
+                delta_points.append(f"Presentation slides: {curr_meta.get('slide_count')}")
+            if curr_meta.get("estimated_pages"):
+                delta_points.append(f"Document page count: {curr_meta.get('estimated_pages')} pages")
+            action = f"Update document {file_name}"
+            intent = "Revise documentation content, presentation, and data tables."
+
+        else:
+            tags.extend(["project-archive"])
+            delta_points.append(f"Updated {file_name} project payload")
+            action = f"Update creative asset {file_name}"
+            intent = "Update application project state and workspace asset."
+
+        if vision_summary and vision_summary not in delta_points:
+            delta_points.append(vision_summary)
+
+        if len(action) >= 50:
+            action = f"Update {file_name}"[:49]
+
+        return DifferOutput(action[:49], delta_points, intent, tags)

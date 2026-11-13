@@ -6,12 +6,13 @@
 
 <p align="center">
   <b>Autonomous, Multi-Domain Version Control System & Semantic Differ Engine</b><br>
-  <i>Designed for Source Code, Hardware/EDA, CAD/3D Models, Databases, and Binary Assets</i>
+  <i>Universal Support for Source Code, Hardware/EDA, CAD/3D, Video, Audio, Creative Suites, Documents & Databases</i>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/tests-54%20passed-brightgreen.svg" alt="Tests"/>
+  <img src="https://img.shields.io/badge/tests-61%20passed-brightgreen.svg" alt="Tests"/>
   <img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python"/>
+  <img src="https://img.shields.io/badge/formats-Universal%20Media%20%2B%20Apps-blueviolet.svg" alt="Formats"/>
   <img src="https://img.shields.io/badge/runtime-100%25%20Fully%20Independent-success.svg" alt="Independent"/>
   <img src="https://img.shields.io/badge/storage-SHA--256%20CAS%20%2B%20Merkle-purple.svg" alt="Storage"/>
   <a href="https://github.com/codecrafters-io/build-your-own-x"><img src="https://img.shields.io/badge/inspired%20by-build--your--own--x-orange.svg" alt="Build Your Own X"/></a>
@@ -53,9 +54,14 @@ Traditional version control systems like Git were built primarily for flat ASCII
 
 | Domain | File Types Tracked | Traditional VCS Limitation | VCX Solution & Superpower |
 | :--- | :--- | :--- | :--- |
+| **Video Production & Streaming** | MP4, MOV, MKV, WebM, AVI, ProRes (`.mp4`, `.mov`, `.mkv`, `.webm`) | Treated as dumb binary files; no insight into stream changes | **Media Stream Analyzer**: tracks frame resolution (1080p $\to$ 4K), framerate (24 $\to$ 60fps), duration deltas, codecs (HEVC, ProRes, AV1), and audio stream layouts. |
+| **Audio Engineering & Stems** | WAV, FLAC, MP3, AAC, OGG, AIFF (`.wav`, `.flac`, `.mp3`) | Large opaque binaries; git LFS blind to audio shifts | **Acoustic Spec Inspection**: tracks sample rates (44.1kHz $\to$ 96kHz), bit depths (16 $\to$ 24-bit), channel layouts (Mono, Stereo, 5.1 Surround), and duration deltas. |
+| **Creative Apps & Video Editors** | Premiere Pro (`.prproj`), Final Cut (`.fcpxml`), DaVinci (`.edl`), Audacity (`.aup3`), Filmcraft | Corrupted merges, proprietary app lock-in | **Project Container Dissection**: decompresses Premiere/FCP XML timelines (sequences, video/audio tracks, clips), queries Audacity SQLite sessions, and diffs cuts and stems. |
+| **Design & 3D Authoring** | Photoshop (`.psd`, `.psb`), Blender (`.blend`), glTF/GLB (`.gltf`, `.glb`), SVG | Monolithic binary files with zero visibility into art assets | **Canvas & Scene Graph Engine**: parses Photoshop 8BPS headers (dimensions, color modes, channels), Blender versions/blocks, and glTF nodes/meshes/materials. |
 | **Hardware & EDA** | Verilog, SystemVerilog (`.v`, `.sv`), JSON Floorplans | Line conflicts when merging pinouts; opaque macro shifts | **Semantic port synthesis**: merges disjoint pinout additions without conflict; detects ALU pipeline modifications and ISA decode logic. |
 | **CAD & 3D Engineering** | FreeCAD (`.fcstd`), STEP (`.step`, `.stp`), STL, OBJ | Treated as opaque binary files; git LFS cannot diff geometry | **CAD Solid B-Rep Engine**: parses ISO-10303-21 manifold solids, calculates bounding box extents (`dx, dy, dz` in mm), and merges non-colliding parametric dimensions. |
-| **Software Development** | Python, Rust, C, C++ | Blind diffs showing moved lines without intent | **AST-aware semantic diffing**: recognizes renamed functions, memory safety primitives (`unsafe`, `Box`, `malloc`), and control flow shifts. |
+| **Software Development** | Python, Rust, C, C++, JavaScript, TypeScript, Go | Blind diffs showing moved lines without intent | **AST-aware semantic diffing**: recognizes renamed functions, memory safety primitives (`unsafe`, `Box`, `malloc`), and control flow shifts. |
+| **Documents & Office Suites** | PDF, Word (`.docx`), Excel (`.xlsx`), PowerPoint (`.pptx`) | Binary collisions; unreadable raw XML diffs | **Document Structure Inspection**: extracts word counts, spreadsheet sheets, slide counts, revision history, and PDF page counts. |
 | **Databases & Event Streams** | SQLite (`.db`, `.sqlite`), CSV, TSV, Transaction Logs | Corrupt index merges; binary diff blobs | **Schema & Row-Level Delta Tracking**: diffs table definitions, column types, row counts, and auto-synthesizes appended audit logs. |
 | **Autonomous AI Agents** | Automated Agent Pipelines, CI/CD, Robotics | Hallucinatory commit messages and fragile tools | **Deterministic Differ Agent**: operates offline or with Gemini API, strictly adhering to JSON schemas with zero hallucinations. |
 
@@ -335,7 +341,7 @@ VCX includes comprehensive unit and integration tests covering CAS integrity, Me
 python3 -m unittest discover tests -v
 ```
 
-*(54 tests passing with 100% success rate)*
+*(61 tests passing with 100% success rate)*
 
 ```text
 test_binary_analyzer (test_analyzers.TestAnalyzers) ... ok
