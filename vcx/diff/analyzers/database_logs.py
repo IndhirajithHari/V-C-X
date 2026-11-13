@@ -80,27 +80,36 @@ class DatabaseLogsAnalyzer(BaseAnalyzer):
             f.write(content)
             temp_path = f.name
 
+        conn = None
         try:
-            conn = sqlite3.connect(temp_path)
+            conn = sqlite3.connect(temp_path, timeout=3.0)
             cursor = conn.cursor()
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
             tables = [row[0] for row in cursor.fetchall()]
 
             for t in tables:
+                escaped_t = t.replace('"', '""')
                 try:
-                    cursor.execute(f"SELECT count(*) FROM [{t}];")
+                    cursor.execute(f'SELECT count(*) FROM "{escaped_t}";')
                     cnt = cursor.fetchone()[0]
-                    cursor.execute(f"PRAGMA table_info([{t}]);")
+                    cursor.execute(f'PRAGMA table_info("{escaped_t}");')
                     cols = [row[1] for row in cursor.fetchall()]
                     meta[t] = {"count": cnt, "columns": cols}
                 except Exception:
                     meta[t] = {"count": 0, "columns": []}
-            conn.close()
         except Exception:
             pass
         finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
             if os.path.exists(temp_path):
-                os.remove(temp_path)
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
 
         return meta
 

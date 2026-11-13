@@ -32,10 +32,22 @@ class BaseAnalyzer(ABC):
         old_text: str,
         new_text: str,
         file_name: str,
+        max_lines: int = 5000,
     ) -> str:
-        """Generate unified diff string."""
+        """Generate unified diff string with scalability guards for huge netlists/logs."""
         old_lines = old_text.splitlines(keepends=True)
         new_lines = new_text.splitlines(keepends=True)
+
+        # Scalability guard: bypass difflib if files are excessively large
+        if len(old_lines) > max_lines or len(new_lines) > max_lines:
+            delta = len(new_lines) - len(old_lines)
+            return (
+                f"--- a/{file_name} (large file, {len(old_lines)} lines)\n"
+                f"+++ b/{file_name} (large file, {len(new_lines)} lines)\n"
+                f"@@ -1,{len(old_lines)} +1,{len(new_lines)} @@\n"
+                f"[Summary: text size {len(new_text)} bytes, line delta: {delta:+d} lines]"
+            )
+
         diff = difflib.unified_diff(
             old_lines,
             new_lines,

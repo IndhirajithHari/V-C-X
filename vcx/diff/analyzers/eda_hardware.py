@@ -20,7 +20,12 @@ class EdaHardwareAnalyzer(BaseAnalyzer):
 
         raw_diff = self.compute_text_diff(old_text, new_text, file_name)
 
-        if file_name.endswith(".json") or "floorplan" in file_name.lower():
+        is_floorplan = (
+            file_name.endswith((".def", ".lef", ".json"))
+            or "floorplan" in file_name.lower()
+            or "placement" in file_name.lower()
+        )
+        if is_floorplan:
             old_meta = self._analyze_floorplan(old_text)
             new_meta = self._analyze_floorplan(new_text)
             domain_facts = self._compute_floorplan_delta(old_meta, new_meta)

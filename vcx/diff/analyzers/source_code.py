@@ -85,8 +85,8 @@ class SourceCodeAnalyzer(BaseAnalyzer):
                     meta["control_flow"]["try_except"] += 1
                 elif isinstance(node, ast.With):
                     meta["control_flow"]["with_blocks"] += 1
-        except SyntaxError:
-            # Fallback regex if AST parsing fails
+        except (SyntaxError, ValueError, RecursionError):
+            # Fallback regex if AST parsing fails or encounters null bytes
             meta["functions"] = {
                 m.group(1): {"args": []}
                 for m in re.finditer(r"def\s+([a-zA-Z0-9_]+)\s*\(", code)

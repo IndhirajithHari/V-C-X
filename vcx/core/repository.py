@@ -111,27 +111,60 @@ class Repository:
         except Exception:
             return {}
 
+    def _sanitize_path(self, path_str: str | Path) -> str:
+        """Sanitize path and ensure it is strictly confined within the repository root."""
+        raw = str(path_str).strip()
+        if os.path.isabs(raw) or raw.startswith("/") or raw.startswith("\\"):
+            raise ValueError(f"Path traversal detected (absolute path not permitted): {path_str}")
+        norm = os.path.normpath(raw)
+        if norm.startswith("..") or norm == "..":
+            raise ValueError(f"Path traversal detected (directory escape): {path_str}")
+        resolved = (self.root / norm).resolve()
+        if not resolved.is_relative_to(self.root):
+            raise ValueError(f"Path escapes repository root: {path_str}")
+        return str(resolved.relative_to(self.root))
+
     def add(self, paths: List[str | Path]) -> List[str]:
         """Add files to staging index and store blobs."""
         staged: List[str] = []
         for p in paths:
-            target = (self.root / p).resolve()
+            try:
+                target = (self.root / p).resolve()
+                if not target.is_relative_to(self.root):
+                    continue
+            except Exception:
+                continue
+
             if not target.exists():
-                # Check if it was deleted from disk
-                rel = str(Path(p))
-                if rel in self.index:
-                    self.index.remove(rel)
-                    staged.append(rel)
+                # Handle deleted file
+                try:
+                    rel = str(target.relative_to(self.root))
+                    if rel in self.index:
+                        self.index.remove(rel)
+                        staged.append(rel)
+                except ValueError:
+                    pass
                 continue
 
             if target.is_dir():
+                dir_rel = str(target.relative_to(self.root))
+                found_in_dir = set()
                 for root, dirs, files in os.walk(target):
                     dirs[:] = [d for d in dirs if d not in self.IGNORE_DIRS]
                     for f in files:
                         file_path = Path(root) / f
                         rel_path = str(file_path.relative_to(self.root))
+                        found_in_dir.add(rel_path)
                         self._stage_file(file_path, rel_path)
                         staged.append(rel_path)
+
+                # Prune files deleted from disk under this directory
+                for ie in self.index.entries():
+                    prefix = dir_rel if dir_rel != "." else ""
+                    if not prefix or ie.path.startswith(prefix + "/"):
+                        if ie.path not in found_in_dir and not (self.root / ie.path).exists():
+                            self.index.remove(ie.path)
+                            staged.append(ie.path)
             else:
                 rel_path = str(target.relative_to(self.root))
                 self._stage_file(target, rel_path)
@@ -237,6 +270,9 @@ class Repository:
             agent_outputs: List[DifferOutput] = []
             for entry in index_entries:
                 old_sha = head_entries[entry.path].sha if entry.path in head_entries else None
+                # Skip unchanged files during auto commit
+                if old_sha == entry.sha:
+                    continue
                 old_bytes = self.store.read_blob(old_sha) if old_sha else None
                 new_bytes = self.store.read_blob(entry.sha)
 

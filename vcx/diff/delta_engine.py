@@ -31,6 +31,7 @@ class WatcherPayload:
             "current_metadata": self.current_metadata,
             "raw_diff": self.raw_diff,
             "vision_summary": self.vision_summary,
+            "domain_facts": self.domain_facts,
         }
 
 
@@ -54,7 +55,7 @@ class DeltaEngine:
             file_name, new_content or old_content
         )
 
-        if file_type.startswith("source/"):
+        if file_type.startswith("source/") or file_type == "text/plain":
             result = self.code_analyzer.analyze(old_content, new_content, file_name)
         elif file_type.startswith("eda/"):
             result = self.eda_analyzer.analyze(old_content, new_content, file_name)

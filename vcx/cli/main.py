@@ -113,9 +113,17 @@ def cmd_diff(args: argparse.Namespace) -> int:
     engine = DeltaEngine()
     agent = SemanticDifferAgent()
 
+    target_filter = None
+    if args.path:
+        try:
+            target_filter = repo._sanitize_path(args.path)
+        except ValueError as e:
+            print(f"fatal: {e}", file=sys.stderr)
+            return 1
+
     for item in all_changes:
         rel_path = item["path"]
-        if args.path and args.path != rel_path:
+        if target_filter and target_filter != rel_path:
             continue
 
         head_entries = repo.get_head_tree_entries()
@@ -202,6 +210,9 @@ def cmd_watch(args: argparse.Namespace) -> int:
     try:
         while True:
             time.sleep(1)
+            if not watcher._thread or not watcher._thread.is_alive():
+                print("fatal: background watcher process terminated unexpectedly", file=sys.stderr)
+                return 1
     except KeyboardInterrupt:
         print("\nStopping VCX Watcher...")
         watcher.stop()

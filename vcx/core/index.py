@@ -16,7 +16,7 @@ class Index:
         self.load()
 
     def load(self) -> None:
-        """Load index from disk."""
+        """Load index from disk with corruption safety and backups."""
         if not self.index_file.exists():
             self._entries = {}
             return
@@ -24,11 +24,25 @@ class Index:
         try:
             content = self.index_file.read_text(encoding="utf-8")
             data = json.loads(content)
+            if not isinstance(data, dict):
+                raise ValueError("Index content is not a JSON object")
             self._entries = {
                 path: IndexEntry.from_dict(entry) for path, entry in data.items()
             }
-        except (json.JSONDecodeError, OSError):
-            self._entries = {}
+        except Exception as err:
+            import shutil
+            import time
+
+            backup_file = self.index_file.with_name(
+                f"index.corrupt.{int(time.time())}"
+            )
+            try:
+                shutil.copy2(self.index_file, backup_file)
+            except Exception:
+                pass
+            raise RuntimeError(
+                f"Corrupt index file detected ({err}). Preserved existing index as {backup_file.name}"
+            ) from err
 
     def write(self) -> None:
         """Save index to disk atomically."""

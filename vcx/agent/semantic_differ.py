@@ -38,11 +38,16 @@ class SemanticDifferAgent:
         try:
             import urllib.request
 
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={self.api_key}"
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+            payload_dict = payload.to_dict()
+            # Bounded token window guard: truncate oversized diffs for LLM prompt
+            if payload_dict.get("raw_diff") and len(payload_dict["raw_diff"]) > 10000:
+                payload_dict["raw_diff"] = payload_dict["raw_diff"][:10000] + "\n... [diff truncated]"
+
             prompt_content = (
                 f"{SYSTEM_PROMPT}\n\n"
                 f"Analyze the following change payload:\n"
-                f"{json.dumps(payload.to_dict(), indent=2)}"
+                f"{json.dumps(payload_dict, indent=2)}"
             )
             req_body = json.dumps(
                 {
@@ -54,7 +59,10 @@ class SemanticDifferAgent:
             req = urllib.request.Request(
                 url,
                 data=req_body,
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "x-goog-api-key": self.api_key,
+                },
             )
             with urllib.request.urlopen(req, timeout=10) as resp:
                 res_data = json.loads(resp.read().decode("utf-8"))

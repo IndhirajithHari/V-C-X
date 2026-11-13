@@ -14,6 +14,7 @@ class DifferInput:
     current_metadata: Union[Dict[str, Any], str]
     raw_diff: str
     vision_summary: str = ""
+    domain_facts: Optional[Dict[str, Any]] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> DifferInput:
@@ -24,6 +25,7 @@ class DifferInput:
             current_metadata=data.get("current_metadata", {}),
             raw_diff=data.get("raw_diff", ""),
             vision_summary=data.get("vision_summary", ""),
+            domain_facts=data.get("domain_facts"),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -34,6 +36,7 @@ class DifferInput:
             "current_metadata": self.current_metadata,
             "raw_diff": self.raw_diff,
             "vision_summary": self.vision_summary,
+            "domain_facts": self.domain_facts,
         }
 
 

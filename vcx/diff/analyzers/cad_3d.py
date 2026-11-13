@@ -50,8 +50,12 @@ class Cad3DAnalyzer(BaseAnalyzer):
         if lower.endswith((".fcstd", ".fcproj", ".xml", ".fcmacro")):
             meta.update(self._parse_freecad_content(content))
 
-        # STL / Mesh inspection using trimesh
-        elif lower.endswith((".stl", ".obj", ".step", ".stp")):
+        # STEP / STP CAD boundary representation
+        elif lower.endswith((".step", ".stp")):
+            meta.update(self._parse_step_content(content))
+
+        # STL / OBJ Polygon Mesh inspection using trimesh
+        elif lower.endswith((".stl", ".obj")):
             meta.update(self._parse_mesh_content(content, file_name))
 
         return meta
@@ -59,9 +63,21 @@ class Cad3DAnalyzer(BaseAnalyzer):
     def _parse_freecad_content(self, content: bytes) -> Dict[str, Any]:
         result: Dict[str, Any] = {"parametric_features": {}}
 
+        # If it's a FreeCAD .fcstd ZIP container, extract Document.xml
+        xml_bytes = content
+        if content.startswith(b"PK\x03\x04"):
+            try:
+                import zipfile
+
+                with zipfile.ZipFile(io.BytesIO(content)) as zf:
+                    if "Document.xml" in zf.namelist():
+                        xml_bytes = zf.read("Document.xml")
+            except Exception:
+                pass
+
         # Try JSON parsing (e.g. filmcraft/freecad project)
         try:
-            data = json.loads(content.decode("utf-8", errors="ignore"))
+            data = json.loads(xml_bytes.decode("utf-8", errors="ignore"))
             if isinstance(data, dict):
                 result["format"] = data.get("format", "json_cad")
                 result["parametric_features"] = self._extract_json_cad_params(data)
@@ -71,7 +87,7 @@ class Cad3DAnalyzer(BaseAnalyzer):
 
         # Try XML parsing (FreeCAD Document.xml)
         try:
-            root = ET.fromstring(content.decode("utf-8", errors="ignore"))
+            root = ET.fromstring(xml_bytes.decode("utf-8", errors="ignore"))
             for obj in root.findall(".//Object"):
                 obj_name = obj.attrib.get("name", "Unknown")
                 obj_type = obj.attrib.get("type", "Feature")
@@ -93,12 +109,34 @@ class Cad3DAnalyzer(BaseAnalyzer):
             pass
 
         # Fallback text regex for parametric definitions
-        text = content.decode("utf-8", errors="replace")
+        text = xml_bytes.decode("utf-8", errors="replace")
         features = {}
         for m in re.finditer(r"(Extrusion|Pad|Fillet|Chamfer|Pocket|Hole|Thickness|Radius|Length)\s*[:=]\s*([0-9.]+)\s*(mm)?", text, re.I):
             features[m.group(1)] = f"{m.group(2)}{m.group(3) or 'mm'}"
         result["parametric_features"] = features
         return result
+
+    def _parse_step_content(self, content: bytes) -> Dict[str, Any]:
+        """Parse STEP / STP boundary-representation files without converting to mesh."""
+        text = content.decode("utf-8", errors="replace")
+        features: Dict[str, Any] = {}
+
+        # Look for geometric dimensions or thickness/fillet annotations in comments/entities
+        for m in re.finditer(r"(Extrusion|Thickness|Length|Radius|Fillet|Chamfer)\s*[:=]\s*([0-9.]+)\s*(mm)?", text, re.I):
+            features[m.group(1)] = f"{m.group(2)}{m.group(3) or 'mm'}"
+
+        # Count boundary representation entities
+        solids = len(re.findall(r"MANIFOLD_SOLID_BREP", text))
+        faces = len(re.findall(r"ADVANCED_FACE", text))
+        cylinders = len(re.findall(r"CYLINDRICAL_SURFACE", text))
+
+        mesh_stats = {
+            "format": "STEP_BREP",
+            "solids": solids,
+            "faces": faces,
+            "cylindrical_surfaces": cylinders,
+        }
+        return {"parametric_features": features, "mesh_stats": mesh_stats}
 
     def _extract_json_cad_params(self, data: Dict[str, Any]) -> Dict[str, Any]:
         params = {}

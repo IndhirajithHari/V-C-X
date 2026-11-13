@@ -34,24 +34,36 @@ class ObjectStore:
         obj_dir = self.objects_dir / sha[:2]
         obj_path = obj_dir / sha[2:]
 
-        if obj_path.exists():
+        if obj_path.exists() and obj_path.stat().st_size > 0:
             return sha
 
         obj_dir.mkdir(parents=True, exist_ok=True)
-        compressed = zlib.compress(full_payload, level=9)
+        compressed = zlib.compress(full_payload, level=6)
         tmp_path = obj_dir / f".tmp_{os.getpid()}_{sha[2:]}"
         tmp_path.write_bytes(compressed)
         tmp_path.replace(obj_path)
         return sha
 
     def read_object(self, sha: str) -> Tuple[ObjectType, bytes]:
-        """Read and decompress an object by SHA."""
+        """Read and decompress an object by SHA, verifying checksum integrity."""
         obj_path = self.objects_dir / sha[:2] / sha[2:]
         if not obj_path.exists():
             raise FileNotFoundError(f"VCX object not found: {sha}")
 
         compressed = obj_path.read_bytes()
-        full_payload = zlib.decompress(compressed)
+        if not compressed:
+            raise ValueError(f"Corrupt zero-byte object in storage: {sha}")
+
+        try:
+            full_payload = zlib.decompress(compressed)
+        except zlib.error as err:
+            raise ValueError(f"Failed to decompress object {sha}: {err}") from err
+
+        actual_sha = hashlib.sha256(full_payload).hexdigest()
+        if actual_sha != sha:
+            raise ValueError(
+                f"Object corruption detected for {sha}: computed checksum was {actual_sha}"
+            )
 
         null_idx = full_payload.find(b"\0")
         if null_idx == -1:

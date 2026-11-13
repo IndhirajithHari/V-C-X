@@ -68,8 +68,28 @@ class WorkspaceWatcher:
                     to_process.add(path)
                     del self._pending_changes[path]
 
-        for rel_path in to_process:
-            self._analyze_and_handle(rel_path)
+        if not to_process:
+            return
+
+        processed_outputs = []
+        for rel_path in sorted(list(to_process)):
+            out = self._analyze_and_handle(rel_path)
+            if out:
+                processed_outputs.append((rel_path, out))
+
+        # Batch auto-commit for all debounced changes in this wave
+        if self.auto_commit and processed_outputs:
+            paths_to_stage = [p for p, _ in processed_outputs]
+            self.repo.add(paths_to_stage)
+            first_out = processed_outputs[0][1]
+            summary = first_out.action_summary
+            if len(processed_outputs) > 1:
+                summary = f"Update {len(processed_outputs)} files"[:49]
+            self.repo.commit(
+                message=summary,
+                auto=False,
+                author="VCX Autonomous Watcher <watcher@vcx.local>",
+            )
 
     def _analyze_and_handle(self, rel_path: str) -> Optional[DifferOutput]:
         full_path = self.repo.root / rel_path
@@ -98,16 +118,7 @@ class WorkspaceWatcher:
         # 2. Semantic Differ Agent processes payload and produces OUTPUT SCHEMA
         output = self.agent.analyze(payload.to_dict())
 
-        # 3. If auto_commit enabled, commit to VCX repository
-        if self.auto_commit:
-            self.repo.add([rel_path])
-            self.repo.commit(
-                message=output.action_summary,
-                auto=False,
-                author="VCX Autonomous Watcher <watcher@vcx.local>",
-            )
-
-        # 4. Trigger callback or display
+        # 3. Trigger callback or display
         if self.callback:
             self.callback(payload, output)
 
@@ -140,12 +151,28 @@ class WorkspaceWatcher:
 
             handler = EventHandler(self)
             notifier = pyinotify.Notifier(wm, handler, timeout=100)
-            wm.add_watch(str(self.repo.root), mask, rec=True, auto_add=True)
+
+            # Exclude ignored directories from inotify watch tree to prevent watch exhaustion
+            def exclude_filter(path_str: str) -> bool:
+                p = Path(path_str)
+                for part in p.parts:
+                    if part in Repository.IGNORE_DIRS:
+                        return True
+                return False
+
+            wm.add_watch(
+                str(self.repo.root),
+                mask,
+                rec=True,
+                auto_add=True,
+                exclude_filter=exclude_filter,
+            )
 
             while self._running:
-                notifier.process_events()
+                # Read and process events in correct order
                 if notifier.check_events():
                     notifier.read_events()
+                    notifier.process_events()
                 self._process_debounced_changes()
                 time.sleep(0.1)
 
@@ -162,7 +189,7 @@ class WorkspaceWatcher:
                         rel = str(p.relative_to(self.repo.root))
                         try:
                             mtime = p.stat().st_mtime
-                            if rel in last_mtimes and last_mtimes[rel] != mtime:
+                            if rel not in last_mtimes or last_mtimes[rel] != mtime:
                                 self.trigger_change(rel)
                             last_mtimes[rel] = mtime
                         except OSError:

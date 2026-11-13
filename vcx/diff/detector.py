@@ -58,14 +58,19 @@ def detect_file_type(file_path: Path | str, content: Optional[bytes] = None) -> 
     if suffix in (".log", ".jsonl"):
         return "log/generic"
 
+    # Text extensions
+    if suffix in (".md", ".txt", ".rst", ".yaml", ".yml", ".toml", ".ini", ".conf", ".cfg", ".json"):
+        return "text/plain"
+
     # Check content if provided
     if content:
         # SQLite header check
         if content.startswith(b"SQLite format 3\000"):
             return "database/sqlite"
-        # Binary check (null bytes or high non-ascii ratio)
+        # Binary check (null bytes)
         if b"\0" in content[:1024]:
             return "binary/unknown"
+        return "text/plain"
 
     # Inspect file on disk if exists and no content was passed
     if content is None and path.is_file():
@@ -76,6 +81,7 @@ def detect_file_type(file_path: Path | str, content: Optional[bytes] = None) -> 
                     return "database/sqlite"
                 if b"\0" in header:
                     return "binary/unknown"
+                return "text/plain"
         except OSError:
             pass
 
