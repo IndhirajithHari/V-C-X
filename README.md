@@ -22,20 +22,76 @@
 
 ---
 
-## Table of Contents
+## 🧭 Interactive Navigation Hub
+
+<table>
+  <tr>
+    <td width="33%" align="center">
+      <a href="#-quick-start--installation"><b>🚀 Quick Start</b></a><br>
+      <sub>Installation & 60-Second Setup</sub>
+    </td>
+    <td width="33%" align="center">
+      <a href="#-command-palette--cli-quick-search"><b>⚡ Command Palette</b></a><br>
+      <sub>Interactive Index for All 22 Commands</sub>
+    </td>
+    <td width="33%" align="center">
+      <a href="#-universal-application-support-500-formats"><b>📦 Universal Formats</b></a><br>
+      <sub>DAWs, CAD, VFX, Game Engines & Big Data</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="33%" align="center">
+      <a href="#-enterprise-capabilities--comparative-matrix"><b>📊 Comparison Matrix</b></a><br>
+      <sub>VCX vs Git vs Git-LFS vs Perforce</sub>
+    </td>
+    <td width="33%" align="center">
+      <a href="#-multi-tier-storage-architecture"><b>🏛️ Storage Architecture</b></a><br>
+      <sub>Hot CAS, Warm Packs & Cold Remote</sub>
+    </td>
+    <td width="33%" align="center">
+      <a href="#-hardware-acceleration--io-specifications"><b>🏎️ Hardware SIMD</b></a><br>
+      <sub>3.3 GB/s memchr & Silicon SHA-NI</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="33%" align="center">
+      <a href="#-industrial-system-guarantees--fault-tolerance"><b>🛡️ Fault Tolerance</b></a><br>
+      <sub>ACID Storage & Index Self-Healing</sub>
+    </td>
+    <td width="33%" align="center">
+      <a href="#-cicd--headless-pipeline-integration"><b>🤖 CI/CD Automation</b></a><br>
+      <sub>Headless Semantic Verification & Watcher</sub>
+    </td>
+    <td width="33%" align="center">
+      <a href="#-test-suite--empirical-verification"><b>🧪 Test Verification</b></a><br>
+      <sub>81/81 Test Suite Benchmarks</sub>
+    </td>
+  </tr>
+</table>
+
+<details open>
+<summary><b>📑 Click to Expand/Collapse Detailed Table of Contents</b></summary>
 
 - [Executive Summary](#executive-summary)
-- [Enterprise Capabilities & Comparative Matrix](#enterprise-capabilities--comparative-matrix)
-- [Industrial System Guarantees & Fault Tolerance](#industrial-system-guarantees--fault-tolerance)
-- [Multi-Tier Storage Architecture](#multi-tier-storage-architecture)
-- [Hardware Acceleration & I/O Specifications](#hardware-acceleration--io-specifications)
-- [Security, Sandboxing & Data Integrity](#security-sandboxing--data-integrity)
-- [Universal Application Support (500+ Formats)](#universal-application-support-500-formats)
-- [CI/CD & Headless Pipeline Integration](#cicd--headless-pipeline-integration)
-- [Installation & Quick Start](#installation--quick-start)
-- [Complete CLI Command Reference & Syntax](#complete-cli-command-reference--syntax)
-- [Test Suite & Empirical Verification](#test-suite--empirical-verification)
+- [Enterprise Capabilities & Comparative Matrix](#-enterprise-capabilities--comparative-matrix)
+- [Industrial System Guarantees & Fault Tolerance](#-industrial-system-guarantees--fault-tolerance)
+- [Multi-Tier Storage Architecture](#-multi-tier-storage-architecture)
+- [Hardware Acceleration & I/O Specifications](#-hardware-acceleration--io-specifications)
+- [Security, Sandboxing & Data Integrity](#-security-sandboxing--data-integrity)
+- [Universal Application Support (500+ Formats)](#-universal-application-support-500-formats)
+- [CI/CD & Headless Pipeline Integration](#-cicd--headless-pipeline-integration)
+- [Quick Start & Installation](#-quick-start--installation)
+- [Command Palette & CLI Quick-Search](#-command-palette--cli-quick-search)
+- [Complete CLI Command Reference](#-complete-cli-command-reference)
+  - [1. Setup, Staging & State Management](#1-setup-staging--state-management)
+  - [2. Commits, History & Semantic Diffs](#2-commits-history--semantic-diffs)
+  - [3. Branching, Merging & Release Tags](#3-branching-merging--release-tags)
+  - [4. Remote Collaboration & Resumable Transport](#4-remote-collaboration--resumable-transport)
+  - [5. Application Dissection, Plugins & Watcher](#5-application-dissection-plugins--watcher)
+- [Test Suite & Empirical Verification](#-test-suite--empirical-verification)
 - [License](#license)
+
+</details>
 
 ---
 
@@ -47,7 +103,7 @@ Modern engineering teams manage heterogeneous artifacts that exceed the architec
 
 ---
 
-## Enterprise Capabilities & Comparative Matrix
+## 📊 Enterprise Capabilities & Comparative Matrix
 
 | Capability | Legacy VCS (Git / SVN) | Git-LFS Workarounds | Enterprise Perforce / Plastic | **VCX Industrial Standard** |
 | :--- | :--- | :--- | :--- | :--- |
@@ -59,9 +115,11 @@ Modern engineering teams manage heterogeneous artifacts that exceed the architec
 | **Multi-Domain Merging** | Text line collisions | No merge support | Lock-only concurrency | **3-Way Semantic Merge** for Verilog pinouts, CAD dimensions, and AST declarations. |
 | **Infrastructure Overhead** | High | External LFS server required | Expensive server license | **Zero Runtime Dependencies**: Runs standalone on any system with Python 3.10+. |
 
+<p align="right"><a href="#-interactive-navigation-hub">▲ Back to Navigation</a></p>
+
 ---
 
-## Industrial System Guarantees & Fault Tolerance
+## 🛡️ Industrial System Guarantees & Fault Tolerance
 
 ```
 [ Working Tree ] ──(Atomic Staging)──► [ .vcx/index.tmp ] ──(fsync + Rename)──► [ .vcx/index ]
@@ -86,9 +144,11 @@ All assets are stored in a Content-Addressed Storage (CAS) hierarchy indexed by 
 - **Lock-Free Read Operations**: Packfiles (`.pack`) and binary indices (`.idx`) are strictly immutable. Multiple background processes, CLI tools, or CI workers read from the object store concurrently without read-lock contention.
 - **Resilient Remote Transport**: The push protocol tracks remote chunk offsets. Network partitions, dropped sockets, or mobile disconnections resume seamlessly from the exact byte where transmission stalled.
 
+<p align="right"><a href="#-interactive-navigation-hub">▲ Back to Navigation</a></p>
+
 ---
 
-## Multi-Tier Storage Architecture
+## 🏛️ Multi-Tier Storage Architecture
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -121,9 +181,11 @@ All assets are stored in a Content-Addressed Storage (CAS) hierarchy indexed by 
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
+<p align="right"><a href="#-interactive-navigation-hub">▲ Back to Navigation</a></p>
+
 ---
 
-## Hardware Acceleration & I/O Specifications
+## 🏎️ Hardware Acceleration & I/O Specifications
 
 For latency-critical paths, VCX binds directly to host native libraries via [`accelerator.py`](file:///home/indhirajith/Documents/VCX/vcx/core/accelerator.py), delivering native throughput with pure-Python portability:
 
@@ -131,37 +193,50 @@ For latency-critical paths, VCX binds directly to host native libraries via [`ac
 - **Hardware-Assisted Cryptography**: Dispatches hashing to OpenSSL `libcrypto.so.3` (`EVP_Digest*`), utilizing dedicated silicon instructions (**Intel SHA-NI** and **ARMv8 Crypto**).
 - **Constant Working Set ($O(1)$ RAM)**: Memory-mapped streaming limits active memory consumption to **$\approx 64\text{ KB}$**, eliminating process heap exhaustion during 100+ GB file operations.
 
+<p align="right"><a href="#-interactive-navigation-hub">▲ Back to Navigation</a></p>
+
 ---
 
-## Security, Sandboxing & Data Integrity
+## 🔒 Security, Sandboxing & Data Integrity
 
 - **Path Traversal Mitigation**: Relative paths containing parent references (`../`), drive anchors, or hidden prefix escapes are rejected before index registration, preventing workspace breakout attacks.
 - **Symlink Boundary Isolation**: Symlinks targeting files outside repository boundaries are safely identified and sandboxed.
 - **Deterministic Agent Verification**: Semantic diff outputs pass through rigid schema validators enforcing imperative summaries, fact-grounded deltas, and zero speculative hallucinations.
 
----
-
-## Universal Application Support (500+ Formats)
-
-VCX provides native inspection, magic byte detection, and container recursion across all major engineering software suites:
-
-```
-├── 3D, CAD & BIM:       .step, .stp, .stl, .obj, .fcstd, .dxf, .dwg, .ifc, .brep, .iges
-├── Video & VFX:         .mp4, .mov, .mkv, .webm, .prproj, .fcpxml, .edl, .aep, .blend
-├── Audio & DAWs:        .als (Ableton), .rpp (Reaper), .flp, .aup3, .wav, .flac, .mp3
-├── Game Engines:        .unity, .prefab, .tscn, .godot, .uproject, .umap
-├── Creative Design:     .psd, .sketch, .kra (Krita), .xcf (GIMP), .svg, .ai
-├── Hardware & EDA:      .v, .sv, .kicad_pcb, .kicad_sch, .sch, .brd, .def, .lef
-├── Columnar & Big Data: .parquet, .feather, .orc, .arrow, .sqlite, .db
-├── Firmware & Binaries: .bin, .hex, .elf, .so, .dylib, .dll, .wasm, .rom
-└── Container Formats:   In-memory recursive dissection for ZIP, Gzip, Tar, and SQLite
-```
+<p align="right"><a href="#-interactive-navigation-hub">▲ Back to Navigation</a></p>
 
 ---
 
-## CI/CD & Headless Pipeline Integration
+## 📦 Universal Application Support (500+ Formats)
 
-VCX integrates into automated build runners, CI/CD matrices, and CAD/EDA test farms:
+VCX provides native inspection, magic byte detection, and container recursion across all major engineering software suites.
+
+<details open>
+<summary><b>📂 Click to View Supported Software & Format Categories</b></summary>
+
+| Application Domain | Supported Formats & Software | Inspection Capabilities |
+| :--- | :--- | :--- |
+| **3D, CAD & BIM** | `.step`, `.stp`, `.stl`, `.obj`, `.fcstd`, `.dxf`, `.dwg`, `.ifc`, `.brep`, `.iges` | Manifold B-Rep solid parsing, boundary dimensions ($dx, dy, dz$), mesh vertex/face counts, and non-colliding dimension merges. |
+| **Video Production & VFX** | `.mp4`, `.mov`, `.mkv`, `.webm`, `.prproj`, `.fcpxml`, `.edl`, `.aep`, `.blend` | Stream resolution, framerates, codecs, Premier/FCP timeline sequence track parsing, and Blender datablock analysis. |
+| **Audio Engineering & DAWs** | `.als` (Ableton), `.rpp` (Reaper), `.flp` (FL Studio), `.aup3` (Audacity), `.wav`, `.flac`, `.mp3` | In-memory container decompression, track count, routing, sample rate, bit depth, and channel configuration inspection. |
+| **Game Engines** | `.unity`, `.prefab`, `.tscn` (Godot), `.godot`, `.uproject` (Unreal), `.umap` | Scene graph hierarchy traversal, component node verification, asset GUID tracking, and YAML/binary scene diffing. |
+| **Graphic & Creative Suites** | `.psd`, `.sketch`, `.kra` (Krita), `.xcf` (GIMP), `.svg`, `.ai` | Photoshop 8BPS header parsing (dimensions, channels, color depth), Krita/Sketch XML container dissecting. |
+| **Hardware & EDA** | `.v`, `.sv` (Verilog/SystemVerilog), `.kicad_pcb`, `.sch`, `.brd`, `.def`, `.lef` | AST port parsing, pinout synthesis, module hierarchy extraction, and automated non-conflicting pin merges. |
+| **Columnar & Big Data** | `.parquet`, `.feather`, `.orc`, `.arrow`, `.sqlite`, `.db` | Magic header validation, schema column definitions, row count tracking, and table structure change detection. |
+| **Firmware & Binaries** | `.bin`, `.hex`, `.elf`, `.so`, `.dylib`, `.dll`, `.wasm`, `.rom` | SIMD Content-Defined Chunking, ASCII/UTF-8 string delta extraction, Shannon entropy profiling, and byte diff previews. |
+
+</details>
+
+<p align="right"><a href="#-interactive-navigation-hub">▲ Back to Navigation</a></p>
+
+---
+
+## 🤖 CI/CD & Headless Pipeline Integration
+
+VCX integrates directly into automated build runners, CI/CD matrices, and CAD/EDA test farms:
+
+<details open>
+<summary><b>💻 Click to View Production CI/CD Scripts</b></summary>
 
 ```bash
 # 1. Headless CI Automated Semantic Verification
@@ -183,32 +258,100 @@ kill $RUNNER_PID
 vcx status && vcx gc
 ```
 
+</details>
+
+<p align="right"><a href="#-interactive-navigation-hub">▲ Back to Navigation</a></p>
+
 ---
 
-## Installation & Quick Start
+## 🚀 Quick Start & Installation
 
 ### Prerequisites
 - **Operating System**: Linux / macOS / Windows
 - **Python**: 3.10 or higher
 - **Native Acceleration**: Automatically binds to host `libc` and `libcrypto` (zero configuration required).
 
-### 1. Installation
 ```bash
+# 1. Clone & Install
 git clone https://github.com/IndhirajithHari/V-C-X.git
 cd V-C-X
 pip install -e .
-```
 
-### 2. Verify Installation
-```bash
+# 2. Verify Installation
 vcx --help
 ```
 
 ---
 
-## Complete CLI Command Reference & Syntax
+## ⚡ Command Palette & CLI Quick-Search
 
-### Repository Setup & Staging
+Click any command below to jump directly to its full syntax, flags, and real-world usage examples:
+
+<table>
+  <tr>
+    <th>Category</th>
+    <th>Quick-Jump Command Palette</th>
+  </tr>
+  <tr>
+    <td><b>1. Setup & Staging</b></td>
+    <td>
+      <a href="#vcx-init-path"><code>vcx init</code></a> • 
+      <a href="#vcx-status"><code>vcx status</code></a> • 
+      <a href="#vcx-add-paths"><code>vcx add</code></a> • 
+      <a href="#vcx-reset-paths"><code>vcx reset</code></a> • 
+      <a href="#vcx-config-key-val---global--l"><code>vcx config</code></a>
+    </td>
+  </tr>
+  <tr>
+    <td><b>2. Commits & Diffs</b></td>
+    <td>
+      <a href="#vcx-commit--m-message---auto"><code>vcx commit</code></a> • 
+      <a href="#vcx-diff-path---semantic"><code>vcx diff</code></a> • 
+      <a href="#vcx-show-target"><code>vcx show</code></a> • 
+      <a href="#vcx-log--n-limit---json"><code>vcx log</code></a>
+    </td>
+  </tr>
+  <tr>
+    <td><b>3. Branch & Merge</b></td>
+    <td>
+      <a href="#vcx-branch-name"><code>vcx branch</code></a> • 
+      <a href="#vcx-checkout-target"><code>vcx checkout</code></a> • 
+      <a href="#vcx-merge-branch"><code>vcx merge</code></a> • 
+      <a href="#vcx-tag-name-target"><code>vcx tag</code></a>
+    </td>
+  </tr>
+  <tr>
+    <td><b>4. Remote & Network</b></td>
+    <td>
+      <a href="#vcx-serve---host-ip---port-port"><code>vcx serve</code></a> • 
+      <a href="#vcx-clone-url-dest"><code>vcx clone</code></a> • 
+      <a href="#vcx-fetch-remote"><code>vcx fetch</code></a> • 
+      <a href="#vcx-push-remote-branch--f"><code>vcx push</code></a> • 
+      <a href="#vcx-remote-addrm-name-url"><code>vcx remote</code></a>
+    </td>
+  </tr>
+  <tr>
+    <td><b>5. Apps, Plugins & Watch</b></td>
+    <td>
+      <a href="#vcx-gc"><code>vcx gc</code></a> • 
+      <a href="#vcx-app-inspect-path--list"><code>vcx app</code></a> • 
+      <a href="#vcx-import-git-path---semantic"><code>vcx import-git</code></a> • 
+      <a href="#vcx-watch---auto-commit---debounce-seconds"><code>vcx watch</code></a> • 
+      <a href="#vcx-agent---input-file"><code>vcx agent</code></a>
+    </td>
+  </tr>
+</table>
+
+<p align="right"><a href="#-interactive-navigation-hub">▲ Back to Navigation</a></p>
+
+---
+
+## 🛠️ Complete CLI Command Reference
+
+### 1. Setup, Staging & State Management
+
+<details open>
+<summary><b>View Setup & Staging Commands</b></summary>
 
 #### `vcx init [path]`
 Initializes a new VCX repository. Creates `.vcx/` directory structure with object store, references, and default configuration.
@@ -237,9 +380,22 @@ vcx reset model.step
 vcx reset
 ```
 
+#### `vcx config [key] [val] [--global] [-l]`
+Inspects or modifies local (`.vcx/config.json`) or global (`~/.vcxconfig.json`) configuration keys.
+```bash
+vcx config user.name "Indhirajith Hari"
+vcx config user.email "developer@example.com"
+vcx config --list
+```
+
+</details>
+
 ---
 
-### Commits, History & Diffs
+### 2. Commits, History & Semantic Diffs
+
+<details open>
+<summary><b>View Commits, History & Diff Commands</b></summary>
 
 #### `vcx commit [-m "<message>"] [--auto]`
 Creates a new commit from the staged snapshot.
@@ -275,9 +431,14 @@ vcx log -n 5
 vcx log --json
 ```
 
+</details>
+
 ---
 
-### Branching, Merging & Tags
+### 3. Branching, Merging & Release Tags
+
+<details open>
+<summary><b>View Branching, Merging & Tag Commands</b></summary>
 
 #### `vcx branch [name]`
 Lists existing branches or creates a new branch pointer at `HEAD`.
@@ -307,41 +468,14 @@ Executes a multi-domain 3-way semantic merge with common ancestor detection. Rec
 vcx merge feature/aerodynamics
 ```
 
----
-
-### Maintenance & Optimization
-
-#### `vcx gc`
-Executes garbage collection. Consolidates loose objects into `.pack` archives with high-speed `VID2` binary fanout indices, pruning unreachable objects.
-```bash
-vcx gc
-```
-
-#### `vcx config [key] [val] [--global] [-l]`
-Inspects or modifies local (`.vcx/config.json`) or global (`~/.vcxconfig.json`) configuration keys.
-```bash
-vcx config user.name "Indhirajith Hari"
-vcx config user.email "developer@example.com"
-vcx config --list
-```
-
-#### `vcx app inspect <path> | list`
-Inspects project metadata for creative applications, game engines, and DAWs, or prints the universal format taxonomy.
-```bash
-vcx app inspect track.als
-vcx app list
-```
-
-#### `vcx import-git [path] [--semantic]`
-Imports an existing Git repository's complete commit history into native VCX Merkle CAS storage.
-```bash
-vcx import-git .
-vcx import-git /path/to/git/repo --semantic
-```
+</details>
 
 ---
 
-### Remote Transport & Collaboration
+### 4. Remote Collaboration & Resumable Transport
+
+<details open>
+<summary><b>View Remote & Resumable Transport Commands</b></summary>
 
 #### `vcx remote [add|rm] [name] [url]`
 Manages tracked remote repository endpoints in `.vcx/remotes.json`.
@@ -377,9 +511,34 @@ vcx push origin main
 vcx push origin main -f
 ```
 
+</details>
+
 ---
 
-### Automation & Continuous Watcher
+### 5. Application Dissection, Plugins & Watcher
+
+<details open>
+<summary><b>View Application, Plugin & Automation Commands</b></summary>
+
+#### `vcx gc`
+Executes garbage collection. Consolidates loose objects into `.pack` archives with high-speed `VID2` binary fanout indices, pruning unreachable objects.
+```bash
+vcx gc
+```
+
+#### `vcx app inspect <path> | list`
+Inspects project metadata for creative applications, game engines, and DAWs, or prints the universal format taxonomy.
+```bash
+vcx app inspect track.als
+vcx app list
+```
+
+#### `vcx import-git [path] [--semantic]`
+Imports an existing Git repository's complete commit history into native VCX Merkle CAS storage.
+```bash
+vcx import-git .
+vcx import-git /path/to/git/repo --semantic
+```
 
 #### `vcx watch [--auto-commit] [--debounce <seconds>]`
 Monitors the workspace in real-time using Linux kernel `pyinotify`. Live-streams semantic deltas and optionally creates automatic checkpoint commits.
@@ -394,9 +553,13 @@ Runs the Semantic Differ Agent directly from standard input or a JSON file.
 vcx agent --input delta_facts.json
 ```
 
+</details>
+
+<p align="right"><a href="#-interactive-navigation-hub">▲ Back to Navigation</a></p>
+
 ---
 
-## Test Suite & Empirical Verification
+## 🧪 Test Suite & Empirical Verification
 
 VCX includes an exhaustive test suite covering streaming CAS, Merkle tree reuse, `VID2` fanout lookups, 3-way semantic merging, STEP B-Rep parsing, C hardware acceleration, and resumable network transport:
 
@@ -409,6 +572,8 @@ Ran 81 tests in 2.862s
 
 OK
 ```
+
+<p align="right"><a href="#-interactive-navigation-hub">▲ Back to Navigation</a></p>
 
 ---
 
