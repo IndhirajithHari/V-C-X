@@ -268,19 +268,70 @@ vcx status && vcx gc
 ## 🚀 Quick Start & Installation
 
 ### Prerequisites
-- **Operating System**: Linux / macOS / Windows
 - **Python**: 3.10 or higher
-- **Native Acceleration**: Automatically binds to host `libc` and `libcrypto` (zero configuration required).
+- **Native Acceleration**: Automatically discovers host libraries (`msvcrt`/`libcrypto` on Windows, `/usr/lib/libc.dylib` on macOS, `libc.so.6` on Linux).
 
-```bash
-# 1. Clone & Install
+---
+
+### Step-by-Step Installation by Operating System
+
+#### 🪟 Windows (PowerShell or Command Prompt)
+```powershell
+# 1. Clone repository
 git clone https://github.com/IndhirajithHari/V-C-X.git
 cd V-C-X
+
+# 2. (Recommended) Create & activate virtual environment
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+# 3. Install VCX in editable mode
 pip install -e .
 
-# 2. Verify Installation
+# 4. Verify installation
 vcx --help
 ```
+> **Windows Integration**: VCX automatically normalizes backslashes (`\`) to canonical repository paths, supports Windows CRLF line endings, and uses `msvcrt.dll` and OpenSSL Windows DLLs for acceleration.
+
+---
+
+#### 🍎 macOS (Terminal — Apple Silicon M1/M2/M3 & Intel)
+```bash
+# 1. Clone repository
+git clone https://github.com/IndhirajithHari/V-C-X.git
+cd V-C-X
+
+# 2. (Recommended) Create & activate virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 3. Install VCX in editable mode
+pip install -e .
+
+# 4. Verify installation
+vcx --help
+```
+> **macOS Integration**: VCX dynamically binds to `/usr/lib/libc.dylib` and OpenSSL (`/opt/homebrew/lib/libcrypto.dylib` on Apple Silicon or `/usr/local/opt/openssl/lib/` on Intel).
+
+---
+
+#### 🐧 Linux (Ubuntu, Debian, Fedora, Arch, RHEL)
+```bash
+# 1. Clone repository
+git clone https://github.com/IndhirajithHari/V-C-X.git
+cd V-C-X
+
+# 2. (Recommended) Create & activate virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 3. Install VCX in editable mode
+pip install -e .
+
+# 4. Verify installation
+vcx --help
+```
+> **Linux Integration**: Automatically includes `pyinotify` kernel monitoring for non-blocking file watching and links to `libc.so.6` AVX2/SSE2 vector assembly.
 
 ---
 
