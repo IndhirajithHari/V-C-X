@@ -287,156 +287,48 @@ vcx --help
 
 Click any command below to jump directly to its full syntax, flags, and real-world usage examples:
 
-<table>
-  <thead>
-    <tr>
-      <th width="20%">Command</th>
-      <th width="48%">Primary Capabilities & Uses</th>
-      <th width="32%">When / Why to Use</th>
-    </tr>
-  </thead>
-  <tbody>
-    <!-- 1. Setup, Staging & State Management -->
-    <tr>
-      <td colspan="3" bgcolor="#161b22"><b>📁 1. Setup, Staging & Configuration</b></td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-init-path"><b><code>vcx init</code></b></a></td>
-      <td>Initializes a new standalone VCX repository with SHA-256 CAS, refs, and index.</td>
-      <td>Run once when creating a new project or versioning an existing folder.</td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-status"><b><code>vcx status</code></b></a></td>
-      <td>Displays working tree status (staged, unstaged, untracked) grouped by domain taxonomy.</td>
-      <td>Inspect pending modifications, added files, and domain classifications.</td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-add-paths"><b><code>vcx add</code></b></a></td>
-      <td>Stages files into <code>.vcx/index</code>. Assets $> 1\text{ MB}$ stream via kernel <code>mmap</code>.</td>
-      <td>Prepare code, CAD models, videos, and datasets for commit with zero RAM bloat.</td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-reset-paths"><b><code>vcx reset</code></b></a></td>
-      <td>Unstages specific files or restores the staging index back to <code>HEAD</code>.</td>
-      <td>Undo accidental staging without modifying or discarding working tree files.</td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-config-key-val---global--l"><b><code>vcx config</code></b></a></td>
-      <td>Reads or sets repository-local or global author metadata and analyzer parameters.</td>
-      <td>Configure <code>user.name</code>, <code>user.email</code>, custom analyzers, or inspect all settings.</td>
-    </tr>
+### 📁 1. Setup, Staging & Configuration
+| Command | Primary Capabilities & Uses | When / Why to Use |
+| :--- | :--- | :--- |
+| [`vcx init`](#vcx-init-path) | Initializes a new standalone VCX repository with SHA-256 CAS, refs, and index. | Run once when creating a new project or versioning an existing folder. |
+| [`vcx status`](#vcx-status) | Displays working tree status (staged, unstaged, untracked) grouped by domain taxonomy. | Inspect pending modifications, added files, and domain classifications. |
+| [`vcx add`](#vcx-add-paths) | Stages files into `.vcx/index`. Assets $> 1\text{ MB}$ stream via kernel `mmap`. | Prepare code, CAD models, videos, and datasets for commit with zero RAM bloat. |
+| [`vcx reset`](#vcx-reset-paths) | Unstages specific files or restores the staging index back to `HEAD`. | Undo accidental staging without modifying or discarding working tree files. |
+| [`vcx config`](#vcx-config-key-val---global--l) | Reads or sets repository-local or global author metadata and analyzer parameters. | Configure `user.name`, `user.email`, custom analyzers, or inspect all settings. |
 
-    <!-- 2. Commits, History & Diffs -->
-    <tr>
-      <td colspan="3" bgcolor="#161b22"><b>📝 2. Commits, History & Semantic Diffs</b></td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-commit--m-message---auto"><b><code>vcx commit</code></b></a></td>
-      <td>Records a snapshot into Merkle CAS. <code>--auto</code> triggers Semantic Differ Agent.</td>
-      <td>Permanently save milestones with manual messages or AI-inferred intent.</td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-diff-path---semantic"><b><code>vcx diff</code></b></a></td>
-      <td>Diffs working tree against index. <code>--semantic</code> outputs structured JSON deltas.</td>
-      <td>Inspect geometric bounding shifts, AST deltas, CDC mutations, or raw diffs.</td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-show-target"><b><code>vcx show</code></b></a></td>
-      <td>Displays commit metadata, parent SHAs, and extracted domain facts for any ref.</td>
-      <td>Audit exact technical deltas, author attribution, and tags for any historical point.</td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-log--n-limit---json"><b><code>vcx log</code></b></a></td>
-      <td>Traverses the commit ancestry graph. <code>--json</code> emits structured records.</td>
-      <td>Inspect project timeline, audit changes, or pipe history to visualization tools.</td>
-    </tr>
+### 📝 2. Commits, History & Semantic Diffs
+| Command | Primary Capabilities & Uses | When / Why to Use |
+| :--- | :--- | :--- |
+| [`vcx commit`](#vcx-commit--m-message---auto) | Records a snapshot into Merkle CAS. `--auto` triggers Semantic Differ Agent. | Permanently save milestones with manual messages or AI-inferred intent. |
+| [`vcx diff`](#vcx-diff-path---semantic) | Diffs working tree against index. `--semantic` outputs structured JSON deltas. | Inspect geometric bounding shifts, AST deltas, CDC mutations, or raw diffs. |
+| [`vcx show`](#vcx-show-target) | Displays commit metadata, parent SHAs, and extracted domain facts for any ref. | Audit exact technical deltas, author attribution, and tags for any historical point. |
+| [`vcx log`](#vcx-log--n-limit---json) | Traverses the commit ancestry graph. `--json` emits structured records. | Inspect project timeline, audit changes, or pipe history to visualization tools. |
 
-    <!-- 3. Branching, Merging & Release Tags -->
-    <tr>
-      <td colspan="3" bgcolor="#161b22"><b>🌿 3. Branching, Merging & Release Tags</b></td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-branch-name"><b><code>vcx branch</code></b></a></td>
-      <td>Lists all local branches or creates a new branch pointer at current <code>HEAD</code>.</td>
-      <td>Isolate experimental features, CAD redesigns, or release branches.</td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-checkout-target"><b><code>vcx checkout</code></b></a></td>
-      <td>Switches the active branch and synchronizes working tree files to target commit.</td>
-      <td>Move between branches, work on different features, or restore files.</td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-merge-branch"><b><code>vcx merge</code></b></a></td>
-      <td>Executes multi-domain 3-way semantic merge with common ancestor detection.</td>
-      <td>Reconcile hardware pinouts, CAD dimensions, and AST declarations without line conflicts.</td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-tag-name-target"><b><code>vcx tag</code></b></a></td>
-      <td>Creates or lists release tags pointing to specific commit cryptographic SHAs.</td>
-      <td>Mark production milestones (e.g. <code>v1.0.0</code>, <code>tapeout-rev2</code>).</td>
-    </tr>
+### 🌿 3. Branching, Merging & Release Tags
+| Command | Primary Capabilities & Uses | When / Why to Use |
+| :--- | :--- | :--- |
+| [`vcx branch`](#vcx-branch-name) | Lists all local branches or creates a new branch pointer at current `HEAD`. | Isolate experimental features, CAD redesigns, or release branches. |
+| [`vcx checkout`](#vcx-checkout-target) | Switches the active branch and synchronizes working tree files to target commit. | Move between branches, work on different features, or restore files. |
+| [`vcx merge`](#vcx-merge-branch) | Executes multi-domain 3-way semantic merge with common ancestor detection. | Reconcile hardware pinouts, CAD dimensions, and AST declarations without line conflicts. |
+| [`vcx tag`](#vcx-tag-name-target) | Creates or lists release tags pointing to specific commit cryptographic SHAs. | Mark production milestones (e.g. `v1.0.0`, `tapeout-rev2`). |
 
-    <!-- 4. Remote Collaboration & Resumable Transport -->
-    <tr>
-      <td colspan="3" bgcolor="#161b22"><b>🌐 4. Remote Collaboration & Resumable Transport</b></td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-serve---host-ip---port-port"><b><code>vcx serve</code></b></a></td>
-      <td>Launches the built-in HTTP server daemon supporting clone, fetch, and push.</td>
-      <td>Host repositories locally or on central servers for team collaboration.</td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-clone-url-dest"><b><code>vcx clone</code></b></a></td>
-      <td>Clones a remote repository over HTTP or from a local filesystem path.</td>
-      <td>Download a full repository replica with complete Merkle history and working tree.</td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-fetch-remote"><b><code>vcx fetch</code></b></a></td>
-      <td>Downloads missing pack objects from remote and updates remote-tracking refs.</td>
-      <td>Stay synchronized with remote changes without touching your working tree.</td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-push-remote-branch--f"><b><code>vcx push</code></b></a></td>
-      <td>Pushes local commits to remote via <b>Resumable HTTP Range Protocol</b>.</td>
-      <td>Upload commits; self-heals and resumes across network drops without restarting.</td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-remote-addrm-name-url"><b><code>vcx remote</code></b></a></td>
-      <td>Manages tracked remote repository URLs stored in <code>.vcx/remotes.json</code>.</td>
-      <td>Link repositories to origin servers, mirrors, or local network shares.</td>
-    </tr>
+### 🌐 4. Remote Collaboration & Resumable Transport
+| Command | Primary Capabilities & Uses | When / Why to Use |
+| :--- | :--- | :--- |
+| [`vcx serve`](#vcx-serve---host-ip---port-port) | Launches the built-in HTTP server daemon supporting clone, fetch, and push. | Host repositories locally or on central servers for team collaboration. |
+| [`vcx clone`](#vcx-clone-url-dest) | Clones a remote repository over HTTP or from a local filesystem path. | Download a full repository replica with complete Merkle history and working tree. |
+| [`vcx fetch`](#vcx-fetch-remote) | Downloads missing pack objects from remote and updates remote-tracking refs. | Stay synchronized with remote changes without touching your working tree. |
+| [`vcx push`](#vcx-push-remote-branch--f) | Pushes local commits to remote via **Resumable HTTP Range Protocol**. | Upload commits; self-heals and resumes across network drops without restarting. |
+| [`vcx remote`](#vcx-remote-addrm-name-url) | Manages tracked remote repository URLs stored in `.vcx/remotes.json`. | Link repositories to origin servers, mirrors, or local network shares. |
 
-    <!-- 5. Application Dissection, Plugins & Automation -->
-    <tr>
-      <td colspan="3" bgcolor="#161b22"><b>⚙️ 5. Application Dissection, Plugins & Automation</b></td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-gc"><b><code>vcx gc</code></b></a></td>
-      <td>Consolidates loose objects into <code>VID2</code> binary packs and prunes unreachable SHAs.</td>
-      <td>Optimize storage footprint, free disk inodes, and accelerate lookup speeds.</td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-app-inspect-path--list"><b><code>vcx app</code></b></a></td>
-      <td>Inspects creative app project metadata (DAWs, 3D, VFX) or catalogs format support.</td>
-      <td>Inspect Ableton clips, Blender datablocks, Reaper tracks, or browse 500+ formats.</td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-import-git-path---semantic"><b><code>vcx import-git</code></b></a></td>
-      <td>Imports an existing Git repository and converts history into native VCX Merkle CAS.</td>
-      <td>Migrate from legacy Git to 100% native VCX with zero Git runtime dependency.</td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-watch---auto-commit---debounce-seconds"><b><code>vcx watch</code></b></a></td>
-      <td>Monitors workspace in real-time via Linux <code>pyinotify</code> with debounced auto-commit.</td>
-      <td>Maintain hands-free automated checkpoints while working in creative or CAD software.</td>
-    </tr>
-    <tr>
-      <td><a href="#vcx-agent---input-file"><b><code>vcx agent</code></b></a></td>
-      <td>Invokes the Semantic Differ Agent directly from stdin or file with JSON payload.</td>
-      <td>Integrate semantic intent inference into headless CI/CD pipelines and external tools.</td>
-    </tr>
-  </tbody>
-</table>
+### ⚙️ 5. Application Dissection, Plugins & Automation
+| Command | Primary Capabilities & Uses | When / Why to Use |
+| :--- | :--- | :--- |
+| [`vcx gc`](#vcx-gc) | Consolidates loose objects into `VID2` binary packs and prunes unreachable SHAs. | Optimize storage footprint, free disk inodes, and accelerate lookup speeds. |
+| [`vcx app`](#vcx-app-inspect-path--list) | Inspects creative app project metadata (DAWs, 3D, VFX) or catalogs format support. | Inspect Ableton clips, Blender datablocks, Reaper tracks, or browse 500+ formats. |
+| [`vcx import-git`](#vcx-import-git-path---semantic) | Imports an existing Git repository and converts history into native VCX Merkle CAS. | Migrate from legacy Git to 100% native VCX with zero Git runtime dependency. |
+| [`vcx watch`](#vcx-watch---auto-commit---debounce-seconds) | Monitors workspace in real-time via Linux `pyinotify` with debounced auto-commit. | Maintain hands-free automated checkpoints while working in creative or CAD software. |
+| [`vcx agent`](#vcx-agent---input-file) | Invokes the Semantic Differ Agent directly from stdin or file with JSON payload. | Integrate semantic intent inference into headless CI/CD pipelines and external tools. |
 
 <p align="right"><a href="#-navigation-hub">▲ Back to Navigation</a></p>
 
