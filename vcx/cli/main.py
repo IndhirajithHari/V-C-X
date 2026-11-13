@@ -424,6 +424,127 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_config(args: argparse.Namespace) -> int:
+    from vcx.core.config import ConfigManager
+    try:
+        repo = Repository.find()
+        cfg = repo.config
+    except Exception:
+        cfg = ConfigManager()
+
+    if args.list:
+        all_cfg = cfg.list_all()
+        for k, v in sorted(all_cfg.items()):
+            print(f"{k} = {v}")
+        return 0
+
+    if not args.key:
+        print("error: config requires key (or --list)", file=sys.stderr)
+        return 1
+
+    if args.value is None:
+        val = cfg.get(args.key)
+        if val is not None:
+            print(val)
+        return 0
+
+    cfg.set(args.key, args.value, global_scope=args.global_scope)
+    print(f"Set {'global ' if args.global_scope else ''}{args.key} = {args.value}")
+    return 0
+
+
+def cmd_reset(args: argparse.Namespace) -> int:
+    try:
+        repo = Repository.find()
+    except FileNotFoundError as e:
+        print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+    uncommitted = repo.reset(args.paths)
+    if uncommitted:
+        for p in uncommitted:
+            print(f"Unstaged changes for {p}")
+    else:
+        print("Staging index reset to HEAD")
+    return 0
+
+
+def cmd_tag(args: argparse.Namespace) -> int:
+    try:
+        repo = Repository.find()
+    except FileNotFoundError as e:
+        print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+    if not args.name:
+        tags = repo.list_tags()
+        for t in tags:
+            print(t)
+        return 0
+
+    try:
+        target_sha = repo.resolve_ref(args.target) if args.target else None
+        sha = repo.create_tag(args.name, target_sha=target_sha)
+        print(f"Created tag '{args.name}' at {sha[:8]}")
+        return 0
+    except Exception as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_show(args: argparse.Namespace) -> int:
+    try:
+        repo = Repository.find()
+    except FileNotFoundError as e:
+        print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+    target = args.target or "HEAD"
+    sha = repo.resolve_ref(target)
+    if not sha or not repo.store.has_object(sha):
+        print(f"fatal: bad object {target}", file=sys.stderr)
+        return 1
+
+    try:
+        import datetime
+        commit = repo.store.read_commit(sha)
+        print(f"\033[33mcommit {sha}\033[0m")
+        print(f"Author: {commit.author}")
+        dt = datetime.datetime.fromtimestamp(commit.timestamp)
+        print(f"Date:   {dt.strftime('%Y-%m-%d %H:%M:%S')}")
+        if commit.parent_shas:
+            print(f"Parents: {' '.join(p[:8] for p in commit.parent_shas)}")
+        print(f"\n    {commit.message}\n")
+
+        if commit.semantic_delta:
+            print("\033[36m--- Semantic Delta ---\033[0m")
+            for d in commit.semantic_delta.get("technical_delta", []):
+                print(f"  * {d}")
+            tags = commit.semantic_delta.get("tags", [])
+            if tags:
+                print(f"  Tags: {', '.join(tags)}")
+        return 0
+    except Exception as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_import_git(args: argparse.Namespace) -> int:
+    from vcx.bridge.git_importer import GitImporter
+    target_path = Path(args.path or ".").resolve()
+    try:
+        print(f"Importing Git repository from {target_path} into native VCX...")
+        importer = GitImporter(target_path)
+        repo = importer.import_to_vcx(semantic_enrichment=args.semantic)
+        print(f"Successfully converted Git repository into native VCX at {repo.vcx_dir}")
+        print(f"Head at {repo.head_commit_sha[:8] if repo.head_commit_sha else 'empty'}")
+        print("VCX is now operating 100% standalone and native!")
+        return 0
+    except Exception as e:
+        print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="vcx",
@@ -523,6 +644,36 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_serve.add_argument("--host", default="127.0.0.1", help="Host interface to bind")
     p_serve.add_argument("--port", type=int, default=8000, help="Port to bind")
     p_serve.set_defaults(func=cmd_serve)
+
+    # config
+    p_config = subparsers.add_parser("config", help="Get and set repository or global options")
+    p_config.add_argument("key", nargs="?", help="Configuration key (e.g. user.name)")
+    p_config.add_argument("value", nargs="?", help="Configuration value")
+    p_config.add_argument("--global", dest="global_scope", action="store_true", help="Set user-global configuration")
+    p_config.add_argument("-l", "--list", action="store_true", help="List all configurations")
+    p_config.set_defaults(func=cmd_config)
+
+    # reset
+    p_reset = subparsers.add_parser("reset", help="Reset current HEAD to specified state or unstage files")
+    p_reset.add_argument("paths", nargs="*", help="File paths to unstage")
+    p_reset.set_defaults(func=cmd_reset)
+
+    # tag
+    p_tag = subparsers.add_parser("tag", help="Create, list, or verify tags")
+    p_tag.add_argument("name", nargs="?", help="Tag name")
+    p_tag.add_argument("target", nargs="?", help="Target commit SHA or branch (defaults to HEAD)")
+    p_tag.set_defaults(func=cmd_tag)
+
+    # show
+    p_show = subparsers.add_parser("show", help="Show various types of objects (commits, deltas)")
+    p_show.add_argument("target", nargs="?", default="HEAD", help="Commit SHA, branch, or tag")
+    p_show.set_defaults(func=cmd_show)
+
+    # import-git
+    p_import = subparsers.add_parser("import-git", help="Import a Git repository and convert history into native VCX")
+    p_import.add_argument("path", nargs="?", default=".", help="Path to Git repository directory")
+    p_import.add_argument("--semantic", action="store_true", help="Enrich historical commits with VCX Semantic Differ Agent")
+    p_import.set_defaults(func=cmd_import_git)
 
     args = parser.parse_args(argv)
     return args.func(args)

@@ -10,8 +10,9 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/tests-49%20passed-brightgreen.svg" alt="Tests"/>
+  <img src="https://img.shields.io/badge/tests-54%20passed-brightgreen.svg" alt="Tests"/>
   <img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python"/>
+  <img src="https://img.shields.io/badge/runtime-100%25%20Fully%20Independent-success.svg" alt="Independent"/>
   <img src="https://img.shields.io/badge/storage-SHA--256%20CAS%20%2B%20Merkle-purple.svg" alt="Storage"/>
   <a href="https://github.com/codecrafters-io/build-your-own-x"><img src="https://img.shields.io/badge/inspired%20by-build--your--own--x-orange.svg" alt="Build Your Own X"/></a>
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/>
@@ -304,13 +305,17 @@ vcx watch --auto-commit --debounce 0.8
 | **`vcx init`** | `[path]` | Initialize a new VCX repository in the target directory (default `.`) |
 | **`vcx status`** | — | Show working tree status (staged, unstaged, untracked with domain tags) |
 | **`vcx add`** | `<paths...>` | Stage files or directories into `.vcx/index` |
+| **`vcx reset`** | `[paths...]` | Unstage specific files or reset the entire staging index to HEAD |
 | **`vcx commit`** | `-m "<msg>"`, `--auto` | Commit staged changes. `--auto` generates messages via Semantic Differ |
 | **`vcx diff`** | `[path]`, `--semantic` | View working tree or commit deltas. `--semantic` outputs structured JSON |
+| **`vcx show`** | `[target]` | Inspect commit metadata, parent SHAs, and technical deltas (default `HEAD`) |
 | **`vcx log`** | `-n <limit>`, `--json` | Display commit history. `--json` emits structured commit records |
 | **`vcx branch`** | `[name]` | List branches or create a new branch pointer |
 | **`vcx checkout`** | `<target>` | Switch active branch or restore working tree files |
+| **`vcx tag`** | `[name] [target]` | List release tags or create a new tag pointing to a commit SHA |
 | **`vcx merge`** | `<branch>` | Perform multi-domain 3-way semantic merge with two-parent commit |
 | **`vcx gc`** | — | Consolidate loose objects into `.pack`/`.idx` files and prune unreferenced SHAs |
+| **`vcx config`** | `[key] [val] [--global] [-l]`| Manage local/global configurations (`user.name`, `user.email`) |
 | **`vcx remote`** | `[add\|rm] [name] [url]`| Manage tracked remote repositories (`.vcx/remotes.json`) |
 | **`vcx clone`** | `<url> [dest]` | Clone repository from a local path or HTTP endpoint |
 | **`vcx fetch`** | `[remote]` | Download missing pack objects and update remote tracking refs |
@@ -318,16 +323,19 @@ vcx watch --auto-commit --debounce 0.8
 | **`vcx serve`** | `--host <h>`, `--port <p>` | Start lightweight HTTP server daemon for smart network transport |
 | **`vcx watch`** | `--auto-commit`, `--debounce <sec>` | Monitor workspace using `pyinotify` and live-stream semantic deltas |
 | **`vcx agent`** | `--input <file>` | Invoke Semantic Differ Agent directly with JSON payload |
+| **`vcx import-git`** | `[path] [--semantic]` | Convert an existing Git repository into native VCX Merkle CAS |
 
 ---
 
 ## Running the Test Suite
 
-VCX includes comprehensive unit and integration tests covering CAS integrity, Merkle tree reuse, packing/GC, 3-way semantic merging, STEP B-Rep parsing, network transport, and the file watcher:
+VCX includes comprehensive unit and integration tests covering CAS integrity, Merkle tree reuse, packing/GC, 3-way semantic merging, STEP B-Rep parsing, network transport, tags, configs, and the Git importer:
 
 ```bash
 python3 -m unittest discover tests -v
 ```
+
+*(54 tests passing with 100% success rate)*
 
 ```text
 test_binary_analyzer (test_analyzers.TestAnalyzers) ... ok

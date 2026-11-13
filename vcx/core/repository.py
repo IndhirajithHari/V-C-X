@@ -1,6 +1,7 @@
 """Core Repository implementation for VCX."""
 
 from __future__ import annotations
+import fnmatch
 import os
 from pathlib import Path
 import time
@@ -8,6 +9,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from vcx.agent.schemas import DifferOutput
 from vcx.agent.semantic_differ import SemanticDifferAgent
+from vcx.core.config import ConfigManager
 from vcx.core.index import Index
 from vcx.core.object_store import ObjectStore
 from vcx.core.types import Commit, FileChangeType, FileMode, IndexEntry, MergeConflict, MergeResult, ObjectType, TreeEntry
@@ -26,6 +28,7 @@ class Repository:
         self.index = Index(self.root)
         self.delta_engine = DeltaEngine()
         self.agent = SemanticDifferAgent()
+        self.config = ConfigManager(self.root)
 
     @property
     def remotes(self):
@@ -279,23 +282,68 @@ class Repository:
             "branch": self.head_ref.replace("refs/heads/", "") if self.head_ref else "detached",
         }
 
+    def _load_ignore_patterns(self) -> List[str]:
+        patterns: List[str] = []
+        ignore_file = self.root / ".vcxignore"
+        if ignore_file.exists():
+            try:
+                for line in ignore_file.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        patterns.append(line)
+            except Exception:
+                pass
+        return patterns
+
+    def _is_ignored(self, rel_path: str, is_dir: bool = False, patterns: Optional[List[str]] = None) -> bool:
+        parts = rel_path.split("/")
+        if any(p in self.IGNORE_DIRS for p in parts):
+            return True
+        if patterns is None:
+            patterns = self._load_ignore_patterns()
+        for pat in patterns:
+            if pat.endswith("/"):
+                pat_clean = pat.rstrip("/")
+                if is_dir and (fnmatch.fnmatch(rel_path, pat_clean) or fnmatch.fnmatch(parts[-1], pat_clean)):
+                    return True
+                if any(fnmatch.fnmatch(p, pat_clean) for p in parts[:-1]):
+                    return True
+            else:
+                if fnmatch.fnmatch(rel_path, pat) or fnmatch.fnmatch(parts[-1], pat):
+                    return True
+        return False
+
     def _scan_working_tree(self) -> Set[str]:
         results: Set[str] = set()
+        patterns = self._load_ignore_patterns()
         for root, dirs, files in os.walk(self.root):
-            dirs[:] = [d for d in dirs if d not in self.IGNORE_DIRS]
+            dirs[:] = [
+                d for d in dirs
+                if not self._is_ignored(str((Path(root) / d).relative_to(self.root)), is_dir=True, patterns=patterns)
+            ]
             for f in files:
                 p = Path(root) / f
                 rel = str(p.relative_to(self.root))
-                results.add(rel)
+                if not self._is_ignored(rel, is_dir=False, patterns=patterns):
+                    results.add(rel)
         return results
 
     def commit(
         self,
         message: Optional[str] = None,
         auto: bool = False,
-        author: str = "VCX Developer <dev@vcx.local>",
+        author: Optional[str] = None,
     ) -> Tuple[str, Commit]:
         """Commit staged files, optionally invoking Semantic Differ Agent for commit message."""
+        if not author:
+            u_name = self.config.get("user.name")
+            u_email = self.config.get("user.email")
+            if u_name and u_email:
+                author = f"{u_name} <{u_email}>"
+            elif u_name:
+                author = f"{u_name} <{u_name.lower().replace(' ', '')}@vcx.local>"
+            else:
+                author = "VCX Developer <dev@vcx.local>"
         head_entries = self.get_head_tree_entries()
         index_entries = self.index.entries()
         if not index_entries:
@@ -632,3 +680,91 @@ class Repository:
                     pass
 
         return self.store.gc(reachable)
+
+    def create_tag(self, name: str, target_sha: Optional[str] = None) -> str:
+        """Create a tag pointing to a commit SHA (defaults to HEAD)."""
+        sha = target_sha or self.head_commit_sha
+        if not sha:
+            raise ValueError("Cannot create tag: no commits exist in repository")
+        if not self.store.has_object(sha):
+            raise ValueError(f"Object {sha} does not exist in store")
+        tag_file = self.vcx_dir / "refs" / "tags" / name
+        tag_file.parent.mkdir(parents=True, exist_ok=True)
+        tag_file.write_text(f"{sha}\n", encoding="utf-8")
+        return sha
+
+    def list_tags(self) -> List[str]:
+        """List all repository tags."""
+        tags_dir = self.vcx_dir / "refs" / "tags"
+        if not tags_dir.exists():
+            return []
+        return sorted([f.name for f in tags_dir.iterdir() if f.is_file()])
+
+    def resolve_ref(self, ref_or_sha: str) -> Optional[str]:
+        """Resolve a branch, tag, HEAD, or SHA prefix to a full SHA."""
+        clean = ref_or_sha.strip()
+        if clean == "HEAD":
+            return self.head_commit_sha
+
+        # Branch
+        b_file = self.vcx_dir / "refs" / "heads" / clean
+        if b_file.exists():
+            return b_file.read_text().strip()
+
+        # Tag
+        t_file = self.vcx_dir / "refs" / "tags" / clean
+        if t_file.exists():
+            return t_file.read_text().strip()
+
+        # Direct SHA prefix match
+        if len(clean) >= 4:
+            for sha in self.store.list_loose_objects():
+                if sha.startswith(clean):
+                    return sha
+            for reader in self.store.pack_readers:
+                for sha in reader.index.keys():
+                    if sha.startswith(clean):
+                        return sha
+        return None
+
+    def reset(self, paths: Optional[List[str | Path]] = None) -> List[str]:
+        """Reset staging index entries to match HEAD, unstaging changes."""
+        head_entries = self.get_head_tree_entries()
+        reset_paths: List[str] = []
+
+        if paths:
+            for p in paths:
+                rel = self._sanitize_path(p)
+                if rel in head_entries:
+                    he = head_entries[rel]
+                    self.index.add(
+                        IndexEntry(
+                            path=rel,
+                            sha=he.sha,
+                            size=0,
+                            mtime=0.0,
+                            mode=he.mode,
+                            file_type=he.file_type,
+                        )
+                    )
+                else:
+                    if rel in self.index:
+                        self.index.remove(rel)
+                reset_paths.append(rel)
+        else:
+            self.index.clear()
+            for rel, he in head_entries.items():
+                self.index.add(
+                    IndexEntry(
+                        path=rel,
+                        sha=he.sha,
+                        size=0,
+                        mtime=0.0,
+                        mode=he.mode,
+                        file_type=he.file_type,
+                    )
+                )
+            reset_paths = list(head_entries.keys())
+
+        self.index.write()
+        return reset_paths

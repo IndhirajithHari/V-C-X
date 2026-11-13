@@ -289,26 +289,29 @@ class ObjectStore:
 
     def write_commit(
         self,
-        tree_sha: str,
-        parent_shas: List[str],
-        message: str,
-        author: str,
+        tree_sha: str | Commit,
+        parent_shas: Optional[List[str]] = None,
+        message: Optional[str] = None,
+        author: Optional[str] = None,
         committer: Optional[str] = None,
         timestamp: Optional[float] = None,
         semantic_delta: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """Store commit object."""
+        """Store commit object (accepts Commit instance or separate fields)."""
         import time
 
-        commit = Commit(
-            tree_sha=tree_sha,
-            parent_shas=parent_shas,
-            author=author,
-            committer=committer or author,
-            timestamp=timestamp if timestamp is not None else time.time(),
-            message=message,
-            semantic_delta=semantic_delta,
-        )
+        if isinstance(tree_sha, Commit):
+            commit = tree_sha
+        else:
+            commit = Commit(
+                tree_sha=tree_sha,
+                parent_shas=parent_shas or [],
+                author=author or "VCX Developer <dev@vcx.local>",
+                committer=committer or author or "VCX Developer <dev@vcx.local>",
+                timestamp=timestamp if timestamp is not None else time.time(),
+                message=message or "",
+                semantic_delta=semantic_delta,
+            )
         payload = json.dumps(
             commit.to_dict(),
             sort_keys=True,
