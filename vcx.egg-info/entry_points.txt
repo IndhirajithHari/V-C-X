@@ -1,2 +1,0 @@
-[console_scripts]
-vcx = vcx.cli.main:main
