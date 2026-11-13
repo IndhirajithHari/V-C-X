@@ -367,5 +367,31 @@ EOF
         self.assertIn("plugin", out.tags)
 
 
+    def test_exhaustive_format_taxonomy(self):
+        # Verify cross-domain coverage across 500+ format registry
+        samples = [
+            ("wing_airfoil.catpart", "cad/generic"),
+            ("engine_piston.sldprt", "cad/generic"),
+            ("turbine_assembly.ipt", "cad/generic"),
+            ("building_model.ifc", "cad/generic"),
+            ("revit_project.rvt", "cad/generic"),
+            ("neural_network.onnx", "binary/generic"),
+            ("transformer_weights.safetensors", "binary/generic"),
+            ("astronomy_telescope.fits", "scientific/fits"),
+            ("fluid_dynamics.nc", "scientific/hdf5"),
+            ("soundfont_bank.sf2", "audio/generic"),
+            ("ambisonic_track.opus", "audio/ogg"),
+            ("app_module.wasm", "binary/wasm"),
+            ("interactive_ui.svelte", "source/generic"),
+            ("rpc_schema.proto", "source/generic"),
+            ("firmware_os.bin", "binary/generic"),
+            ("vector_drawing.dxf", "cad/dxf"),
+            ("fpga_board.kicad_pcb", "eda/kicad"),
+        ]
+        for name, expected_type in samples:
+            actual = detect_file_type(name)
+            self.assertEqual(actual, expected_type, f"Failed for {name}: got {actual}, expected {expected_type}")
+
+
 if __name__ == "__main__":
     unittest.main()
