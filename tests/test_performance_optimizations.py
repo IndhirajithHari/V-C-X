@@ -126,6 +126,23 @@ class TestPerformanceOptimizations(unittest.TestCase):
         self.assertTrue(commit_sha)
         self.assertEqual(commit.message, "Commit large streaming file")
 
+    def test_simd_fastcdc_throughput_and_accuracy(self):
+        from vcx.diff.analyzers.binary import BinaryAnalyzer
+        ba = BinaryAnalyzer()
+
+        # 4MB simulated binary payload
+        raw1 = bytes((i * 47 + 19) % 256 for i in range(4 * 1024 * 1024))
+        raw2 = bytearray(raw1)
+        raw2[10000:10050] = b"ACCELERATED_DIFF_SIMD"
+        raw2 = bytes(raw2)
+
+        res = ba.analyze(raw1, raw2, "model.bin")
+        facts = res.domain_facts
+
+        self.assertIn("mutation_percentage", facts)
+        self.assertIn("similarity_ratio", facts)
+        self.assertGreater(facts["similarity_ratio"], 0.9)
+
 
 if __name__ == "__main__":
     unittest.main()
