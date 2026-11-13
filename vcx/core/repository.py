@@ -221,17 +221,24 @@ class Repository:
         return staged
 
     def _stage_file(self, full_path: Path, rel_path: str) -> None:
-        content = full_path.read_bytes()
-        sha = self.store.write_blob(content)
         stat = full_path.stat()
+        file_size = stat.st_size
+        if file_size > 1024 * 1024:
+            # Stream large files directly to object store via mmap with constant O(1) memory
+            sha = self.store.write_blob_stream(full_path)
+            f_type = detect_file_type(full_path)
+        else:
+            content = full_path.read_bytes()
+            sha = self.store.write_blob(content)
+            f_type = detect_file_type(full_path, content)
+
         mode = FileMode.EXECUTABLE.value if os.access(full_path, os.X_OK) else FileMode.REGULAR.value
-        f_type = detect_file_type(full_path, content)
 
         self.index.add(
             IndexEntry(
                 path=rel_path,
                 sha=sha,
-                size=len(content),
+                size=file_size,
                 mtime=stat.st_mtime,
                 mode=mode,
                 file_type=f_type,

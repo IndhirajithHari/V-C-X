@@ -155,12 +155,108 @@ class ObjectStore:
         """Store raw file content as a blob."""
         return self.write_object(ObjectType.BLOB, content)
 
+    def write_blob_stream(self, file_path: Path | str) -> str:
+        """Stream a large file from disk to object storage in 64KB chunks with constant O(1) RAM."""
+        import mmap
+        import time
+
+        path = Path(file_path).resolve()
+        file_size = path.stat().st_size
+        header = f"blob {file_size}\0".encode("utf-8")
+
+        hasher = hashlib.sha256()
+        hasher.update(header)
+        compressor = zlib.compressobj(level=6)
+
+        tmp_name = f".tmp_stream_{os.getpid()}_{time.time()}"
+        tmp_path = self.objects_dir / tmp_name
+
+        try:
+            with open(path, "rb") as src, open(tmp_path, "wb") as dst:
+                dst.write(compressor.compress(header))
+
+                if file_size > 0:
+                    try:
+                        with mmap.mmap(src.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                            pos = 0
+                            chunk_size = 65536
+                            while pos < file_size:
+                                chunk = mm[pos : pos + chunk_size]
+                                hasher.update(chunk)
+                                dst.write(compressor.compress(chunk))
+                                pos += chunk_size
+                    except (OSError, ValueError):
+                        src.seek(0)
+                        while True:
+                            chunk = src.read(65536)
+                            if not chunk:
+                                break
+                            hasher.update(chunk)
+                            dst.write(compressor.compress(chunk))
+
+                dst.write(compressor.flush())
+
+            sha = hasher.hexdigest()
+            obj_dir = self.objects_dir / sha[:2]
+            obj_path = obj_dir / sha[2:]
+
+            if obj_path.exists() and obj_path.stat().st_size > 0:
+                tmp_path.unlink(missing_ok=True)
+                return sha
+
+            for reader in self._get_pack_readers():
+                if reader.has_object(sha):
+                    tmp_path.unlink(missing_ok=True)
+                    return sha
+
+            obj_dir.mkdir(parents=True, exist_ok=True)
+            tmp_path.replace(obj_path)
+            return sha
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
+
     def read_blob(self, sha: str) -> bytes:
         """Read blob content."""
         obj_type, data = self.read_object(sha)
         if obj_type != ObjectType.BLOB:
             raise ValueError(f"Expected blob for {sha}, found {obj_type.value}")
         return data
+
+    def read_blob_stream(self, sha: str, chunk_size: int = 65536):
+        """Yield decompressed blob chunks from disk with bounded constant RAM."""
+        obj_path = self.objects_dir / sha[:2] / sha[2:]
+        if obj_path.exists():
+            decompressor = zlib.decompressobj()
+            with open(obj_path, "rb") as f:
+                header_found = False
+                buf = b""
+                while True:
+                    compressed_chunk = f.read(chunk_size)
+                    if not compressed_chunk:
+                        break
+                    decomp = decompressor.decompress(compressed_chunk)
+                    if not header_found:
+                        buf += decomp
+                        null_idx = buf.find(b"\0")
+                        if null_idx != -1:
+                            header_found = True
+                            data_part = buf[null_idx + 1 :]
+                            if data_part:
+                                yield data_part
+                            buf = b""
+                    else:
+                        if decomp:
+                            yield decomp
+                remaining = decompressor.flush()
+                if remaining:
+                    yield remaining
+            return
+
+        # Fallback to packfiles
+        _, data = self.read_object(sha)
+        for i in range(0, len(data), chunk_size):
+            yield data[i : i + chunk_size]
 
     def write_tree(self, entries: List[TreeEntry]) -> str:
         """Store directory structure as a single tree object."""

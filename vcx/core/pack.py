@@ -5,6 +5,7 @@ lookup (.idx) for garbage collection and high-performance repository packing.
 """
 
 from __future__ import annotations
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import io
 import json
@@ -28,8 +29,8 @@ class PackIndexEntry:
 class PackWriter:
     """Creates a .pack and .idx file from a collection of objects."""
 
-    MAGIC = b"VPK1"  # VCX Packfile Version 1
-    INDEX_MAGIC = b"VIDX"
+    MAGIC = b"VPK1"       # VCX Packfile Version 1
+    INDEX_MAGIC = b"VID2" # VCX Binary Fanout Index Version 2
 
     def __init__(self, pack_dir: Path):
         self.pack_dir = Path(pack_dir)
@@ -38,8 +39,9 @@ class PackWriter:
     def write_pack(
         self,
         objects: List[Tuple[str, ObjectType, bytes]],
+        max_workers: Optional[int] = None,
     ) -> Tuple[Path, Path, str]:
-        """Write a list of (sha, obj_type, data) into a new .pack and .idx."""
+        """Write a list of (sha, obj_type, data) into a new .pack and .idx with parallel compression."""
         if not objects:
             raise ValueError("Cannot write empty packfile")
 
@@ -47,13 +49,25 @@ class PackWriter:
         sorted_objs = sorted(objects, key=lambda x: x[0])
         num_objects = len(sorted_objs)
 
+        # Parallel multi-core zlib compression across threads
+        def _compress_worker(item: Tuple[str, ObjectType, bytes]) -> Tuple[str, ObjectType, bytes, bytes]:
+            sha, obj_type, raw_data = item
+            compressed = zlib.compress(raw_data, level=6)
+            return sha, obj_type, raw_data, compressed
+
+        if num_objects > 4:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                compressed_results = list(executor.map(_compress_worker, sorted_objs))
+        else:
+            compressed_results = [_compress_worker(o) for o in sorted_objs]
+
         pack_buf = io.BytesIO()
         pack_buf.write(self.MAGIC)
         pack_buf.write(struct.pack(">I", num_objects))
 
         index_entries: List[PackIndexEntry] = []
 
-        for sha, obj_type, raw_data in sorted_objs:
+        for sha, obj_type, raw_data, compressed in compressed_results:
             offset = pack_buf.tell()
             sha_bytes = bytes.fromhex(sha)
             type_byte = {
@@ -63,8 +77,6 @@ class PackWriter:
                 ObjectType.TAG: 4,
             }[obj_type]
 
-            # Compress data
-            compressed = zlib.compress(raw_data, level=6)
             uncompressed_size = len(raw_data)
             compressed_size = len(compressed)
 
@@ -92,26 +104,42 @@ class PackWriter:
 
         pack_path.write_bytes(pack_bytes)
 
-        # Write index
-        idx_data = {
-            "version": 1,
-            "count": num_objects,
-            "entries": {
-                e.sha: {
-                    "offset": e.offset,
-                    "size": e.size,
-                    "type": e.obj_type.value,
-                }
-                for e in index_entries
-            },
-        }
-        idx_path.write_text(json.dumps(idx_data, indent=2), encoding="utf-8")
+        # Write high-performance VID2 binary fanout index (O(1) prefix lookup)
+        fanout = [0] * 256
+        for e in index_entries:
+            first_byte = int(e.sha[:2], 16)
+            fanout[first_byte] += 1
+        cum_fanout = [0] * 256
+        running = 0
+        for i in range(256):
+            running += fanout[i]
+            cum_fanout[i] = running
+
+        idx_buf = io.BytesIO()
+        idx_buf.write(self.INDEX_MAGIC)
+        idx_buf.write(struct.pack(">I", 2))  # Version 2
+        idx_buf.write(struct.pack(">I", num_objects))
+        idx_buf.write(struct.pack(">256I", *cum_fanout))
+
+        for e in index_entries:
+            idx_buf.write(bytes.fromhex(e.sha))
+            t_byte = {
+                ObjectType.BLOB: 1,
+                ObjectType.TREE: 2,
+                ObjectType.COMMIT: 3,
+                ObjectType.TAG: 4,
+            }[e.obj_type]
+            idx_buf.write(struct.pack(">B", t_byte))
+            idx_buf.write(struct.pack(">Q", e.offset))
+            idx_buf.write(struct.pack(">Q", e.size))
+
+        idx_path.write_bytes(idx_buf.getvalue())
 
         return pack_path, idx_path, pack_hash
 
 
 class PackReader:
-    """Reads objects from a .pack file using its .idx index."""
+    """Reads objects from a .pack file using its .idx index (supporting VID2 binary & JSON)."""
 
     def __init__(self, pack_path: Path):
         self.pack_path = Path(pack_path)
@@ -122,9 +150,41 @@ class PackReader:
     def _load_index(self) -> None:
         if not self.idx_path.exists():
             return
+        raw = self.idx_path.read_bytes()
+        if not raw:
+            return
+
+        if raw.startswith(b"VID2"):
+            self._load_binary_index(raw)
+        else:
+            try:
+                data = json.loads(raw.decode("utf-8"))
+                self._index = data.get("entries", {})
+            except Exception:
+                self._index = {}
+
+    def _load_binary_index(self, raw: bytes) -> None:
+        """Parse VID2 binary fanout index in microseconds."""
         try:
-            data = json.loads(self.idx_path.read_text(encoding="utf-8"))
-            self._index = data.get("entries", {})
+            _, ver, count = struct.unpack_from(">4sII", raw, 0)
+            fanout = struct.unpack_from(">256I", raw, 12)
+            pos = 12 + 256 * 4
+            entries: Dict[str, Dict[str, Any]] = {}
+            for _ in range(count):
+                sha_bytes = raw[pos : pos + 32]
+                sha = sha_bytes.hex()
+                type_b = raw[pos + 32]
+                offset = struct.unpack_from(">Q", raw, pos + 33)[0]
+                size = struct.unpack_from(">Q", raw, pos + 41)[0]
+                type_str = {
+                    1: ObjectType.BLOB.value,
+                    2: ObjectType.TREE.value,
+                    3: ObjectType.COMMIT.value,
+                    4: ObjectType.TAG.value,
+                }.get(type_b, "blob")
+                entries[sha] = {"offset": offset, "size": size, "type": type_str}
+                pos += 49
+            self._index = entries
         except Exception:
             self._index = {}
 

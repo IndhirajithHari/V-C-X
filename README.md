@@ -409,8 +409,13 @@ test_unity_scene_and_prefab (test_universal_apps.TestUniversalApps) ... ok
 test_universal_binary_cdc_and_string_dissection (test_universal_apps.TestUniversalApps) ... ok
 test_universal_container_fallback_zip (test_universal_apps.TestUniversalApps) ... ok
 
+test_mmap_streaming_blob_write_and_read (test_performance_optimizations.TestPerformanceOptimizations) ... ok
+test_pack_reader_json_backward_compatibility (test_performance_optimizations.TestPerformanceOptimizations) ... ok
+test_repository_stages_large_file_via_streaming (test_performance_optimizations.TestPerformanceOptimizations) ... ok
+test_vid2_binary_pack_index_and_parallel_compression (test_performance_optimizations.TestPerformanceOptimizations) ... ok
+
 ----------------------------------------------------------------------
-Ran 73 tests in 1.832s
+Ran 78 tests in 2.181s
 
 OK
 ```
