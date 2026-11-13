@@ -5,10 +5,12 @@ paths, filesystems, and HTTP network endpoints.
 """
 
 from __future__ import annotations
+import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
+import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 import urllib.error
 import urllib.request
@@ -261,32 +263,132 @@ class RemoteTransport:
             dest_branch_file.write_text(f"{local_head_sha}\n")
             return f"Successfully pushed {active_branch} -> {local_head_sha[:8]}"
 
-        # 2. HTTP Push
-        # Determine missing objects
+        # 2. HTTP Push via Resumable Transfer Protocol
+        return cls.push_resumable(
+            repo=repo,
+            remote_name=remote_name,
+            branch=active_branch,
+            force=force,
+        )
+
+    @classmethod
+    def push_resumable(
+        cls,
+        repo: Repository,
+        remote_name: str = "origin",
+        branch: Optional[str] = None,
+        force: bool = False,
+        chunk_size: int = 512 * 1024,
+        max_retries: int = 5,
+        simulate_interrupt_after_bytes: Optional[int] = None,
+    ) -> str:
+        """Push local commits to remote with automatic resume upon network interruption."""
+        remote_url = repo.remotes.get(remote_name)
+        if not remote_url:
+            raise ValueError(f"Remote '{remote_name}' not configured")
+
+        active_branch = branch or (repo.head_ref.replace("refs/heads/", "") if repo.head_ref else "main")
+        local_head_sha = repo.head_commit_sha
+        if not local_head_sha:
+            raise ValueError("No local commits to push")
+
+        # Determine missing objects and package packfile
         local_reachable = repo._collect_reachable_shas([local_head_sha])
         to_pack = [(s, *repo.store.read_object(s)) for s in local_reachable]
 
-        # Package into memory
         tmp_writer = PackWriter(repo.store.pack_dir)
         pack_path, idx_path, p_hash = tmp_writer.write_pack(to_pack)
         pack_bytes = pack_path.read_bytes()
 
-        # Cleanup temp pack on local
+        # Clean up local temporary packfiles
         pack_path.unlink()
         idx_path.unlink()
 
-        receive_url = remote_url.rstrip("/") + "/vcx-receive-pack"
-        req = urllib.request.Request(
-            receive_url,
-            data=pack_bytes,
-            headers={
-                "Content-Type": "application/octet-stream",
-                "X-VCX-Branch": active_branch,
-                "X-VCX-Commit": local_head_sha,
-                "X-VCX-Force": "true" if force else "false",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            msg = resp.read().decode("utf-8")
+        total_size = len(pack_bytes)
+        pack_hash = hashlib.sha256(pack_bytes).hexdigest()
 
-        return msg
+        # Initialize resumable session
+        init_url = remote_url.rstrip("/") + "/vcx-upload-session/init"
+        init_payload = json.dumps({
+            "branch": active_branch,
+            "commit": local_head_sha,
+            "total_size": total_size,
+            "pack_hash": pack_hash,
+            "force": force,
+        }).encode("utf-8")
+
+        req_init = urllib.request.Request(
+            init_url,
+            data=init_payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req_init, timeout=20) as resp:
+            init_res = json.loads(resp.read().decode("utf-8"))
+
+        session_id = init_res["session_id"]
+        status_url = f"{remote_url.rstrip('/')}/vcx-upload-session/status?session_id={session_id}"
+        chunk_url = f"{remote_url.rstrip('/')}/vcx-upload-session/chunk?session_id={session_id}"
+
+        offset = 0
+        has_simulated_interrupt = False
+
+        while offset < total_size:
+            end = min(offset + chunk_size, total_size)
+            chunk = pack_bytes[offset:end]
+
+            # Allow simulating network interruption for test verification
+            if (
+                simulate_interrupt_after_bytes is not None
+                and offset >= simulate_interrupt_after_bytes
+                and not has_simulated_interrupt
+            ):
+                has_simulated_interrupt = True
+                # Query remote server status to simulate reconnect and resume
+                req_stat = urllib.request.Request(status_url)
+                with urllib.request.urlopen(req_stat, timeout=10) as s_resp:
+                    stat_data = json.loads(s_resp.read().decode("utf-8"))
+                    offset = stat_data.get("received_bytes", offset)
+                continue
+
+            headers = {
+                "Content-Type": "application/octet-stream",
+                "Content-Length": str(len(chunk)),
+                "Content-Range": f"bytes {offset}-{end - 1}/{total_size}",
+                "X-VCX-Session-ID": session_id,
+            }
+
+            retries = 0
+            while True:
+                try:
+                    req_chunk = urllib.request.Request(chunk_url, data=chunk, headers=headers)
+                    with urllib.request.urlopen(req_chunk, timeout=30) as resp:
+                        res_data = json.loads(resp.read().decode("utf-8"))
+                        if resp.status == 201 or res_data.get("status") == "completed":
+                            return res_data.get("message", f"Successfully pushed {active_branch}")
+                        offset = res_data.get("received_bytes", end)
+                        break
+                except urllib.error.HTTPError as e:
+                    if e.code == 409:
+                        # Offset mismatch: server reports current received bytes
+                        err_data = json.loads(e.read().decode("utf-8"))
+                        offset = err_data.get("expected_offset", offset)
+                        break
+                    retries += 1
+                    if retries > max_retries:
+                        raise
+                    time.sleep(0.05 * retries)
+                except Exception:
+                    retries += 1
+                    if retries > max_retries:
+                        raise
+                    # Query remote server status to recover current progress
+                    try:
+                        req_stat = urllib.request.Request(status_url)
+                        with urllib.request.urlopen(req_stat, timeout=10) as s_resp:
+                            stat_data = json.loads(s_resp.read().decode("utf-8"))
+                            offset = stat_data.get("received_bytes", offset)
+                    except Exception:
+                        pass
+                    time.sleep(0.05 * retries)
+
+        return f"Successfully pushed {active_branch} -> {local_head_sha[:8]}"

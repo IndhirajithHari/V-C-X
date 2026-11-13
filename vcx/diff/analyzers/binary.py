@@ -16,6 +16,7 @@ import re
 import struct
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from vcx.core.accelerator import fast_cdc_chunks, fast_sha256
 from vcx.diff.analyzers.base import AnalysisResult, BaseAnalyzer
 
 
@@ -119,34 +120,8 @@ class BinaryAnalyzer(BaseAnalyzer):
         )
 
     def _chunk_content(self, data: bytes) -> List[Tuple[int, int, str]]:
-        """Ultra-high throughput (3+ GB/s) AVX2/SIMD Content-Defined Chunking (CDC)."""
-        if not data:
-            return []
-
-        chunks: List[Tuple[int, int, str]] = []
-        pos = 0
-        n = len(data)
-        min_c = self.MIN_CHUNK
-        max_c = self.MAX_CHUNK
-
-        while pos < n:
-            limit = min(pos + max_c, n)
-            target = pos + min_c
-            if target >= n:
-                chunk_slice = data[pos:n]
-                chunks.append((pos, n - pos, hashlib.sha256(chunk_slice).hexdigest()))
-                break
-
-            # AVX2/SIMD memchr scan for deterministic content boundary anchor
-            p = data.find(b"\x00", target, limit)
-            cut = (p + 1) if p != -1 else limit
-
-            chunk_slice = data[pos:cut]
-            chunk_hash = hashlib.sha256(chunk_slice).hexdigest()
-            chunks.append((pos, cut - pos, chunk_hash))
-            pos = cut
-
-        return chunks
+        """High-throughput AVX2/SIMD Content-Defined Chunking (CDC)."""
+        return fast_cdc_chunks(data, min_chunk=self.MIN_CHUNK, max_chunk=self.MAX_CHUNK)
 
     def _extract_strings(self, data: bytes, min_len: int = 4) -> Set[str]:
         """Extract ASCII and UTF-8 printable string tokens."""

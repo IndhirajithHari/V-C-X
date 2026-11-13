@@ -143,6 +143,34 @@ class TestPerformanceOptimizations(unittest.TestCase):
         self.assertIn("similarity_ratio", facts)
         self.assertGreater(facts["similarity_ratio"], 0.9)
 
+    def test_c_native_accelerator_runtime_and_hashing(self):
+        import hashlib
+        from vcx.core.accelerator import fast_cdc_chunks, fast_sha256, get_accelerator_status
+
+        status = get_accelerator_status()
+        self.assertIn("backend", status)
+        self.assertIn("has_c_runtime", status)
+        self.assertIn("has_crypto_accel", status)
+
+        # Verify hash equivalence between hardware C accelerator and hashlib
+        test_payloads = [
+            b"",
+            b"short string",
+            b"0" * 100000,
+            bytes(range(256)) * 64,
+        ]
+        for p in test_payloads:
+            expected = hashlib.sha256(p).hexdigest()
+            actual = fast_sha256(p)
+            self.assertEqual(actual, expected)
+
+        # Verify chunking segmentation
+        large_data = bytes((x * 31) % 256 for x in range(256 * 1024))
+        chunks = fast_cdc_chunks(large_data, min_chunk=4096, max_chunk=16384)
+        self.assertGreater(len(chunks), 0)
+        reconstructed_len = sum(c[1] for c in chunks)
+        self.assertEqual(reconstructed_len, len(large_data))
+
 
 if __name__ == "__main__":
     unittest.main()

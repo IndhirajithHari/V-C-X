@@ -167,6 +167,53 @@ class TestRemoteTransport(unittest.TestCase):
         finally:
             server.stop()
 
+    def test_http_resumable_push_with_interruption(self):
+        # Setup server repo
+        server_dir = self.base_path / "resumable_srv"
+        server_repo = Repository.init(server_dir)
+        (server_dir / "base.txt").write_text("initial base content\n")
+        server_repo.add(["base.txt"])
+        c1, _ = server_repo.commit("Initial base commit")
+
+        # Free port
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+
+        server = VcxServer(server_repo, host="127.0.0.1", port=port)
+        server.start(background=True)
+        time.sleep(0.15)
+
+        try:
+            http_url = f"http://127.0.0.1:{port}"
+            client_dir = self.base_path / "resumable_cli"
+            client_repo = RemoteTransport.clone(http_url, client_dir)
+
+            # Create a larger payload requiring multiple chunks
+            large_content = "RESUMABLE_VCX_CHUNK_DATA_" * 5000  # ~125 KB
+            (client_dir / "large_asset.dat").write_text(large_content)
+            client_repo.add(["large_asset.dat"])
+            c2, _ = client_repo.commit("Add large chunked asset")
+
+            # Push with small 8KB chunk size and simulate interruption after 24KB
+            push_msg = RemoteTransport.push_resumable(
+                client_repo,
+                remote_name="origin",
+                branch="main",
+                chunk_size=8192,
+                simulate_interrupt_after_bytes=24576,
+            )
+
+            self.assertIn("Successfully received push", push_msg)
+
+            # Server ref must point to c2
+            srv_head = (server_dir / ".vcx" / "refs" / "heads" / "main").read_text().strip()
+            self.assertEqual(srv_head, c2)
+            self.assertTrue(server_repo.store.has_object(c2))
+
+        finally:
+            server.stop()
+
 
 if __name__ == "__main__":
     unittest.main()
