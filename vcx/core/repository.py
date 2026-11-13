@@ -189,11 +189,18 @@ class Repository:
             if target.is_dir():
                 dir_rel = str(target.relative_to(self.root))
                 found_in_dir = set()
+                patterns = self._load_ignore_patterns()
                 for root, dirs, files in os.walk(target):
-                    dirs[:] = [d for d in dirs if d not in self.IGNORE_DIRS]
+                    dirs[:] = [
+                        d for d in dirs
+                        if d not in self.IGNORE_DIRS
+                        and not self._is_ignored(str((Path(root) / d).relative_to(self.root)), is_dir=True, patterns=patterns)
+                    ]
                     for f in files:
                         file_path = Path(root) / f
                         rel_path = str(file_path.relative_to(self.root))
+                        if self._is_ignored(rel_path, is_dir=False, patterns=patterns):
+                            continue
                         found_in_dir.add(rel_path)
                         self._stage_file(file_path, rel_path)
                         staged.append(rel_path)
@@ -202,7 +209,7 @@ class Repository:
                 for ie in self.index.entries():
                     prefix = dir_rel if dir_rel != "." else ""
                     if not prefix or ie.path.startswith(prefix + "/"):
-                        if ie.path not in found_in_dir and not (self.root / ie.path).exists():
+                        if ie.path not in found_in_dir and (not (self.root / ie.path).exists() or self._is_ignored(ie.path, patterns=patterns)):
                             self.index.remove(ie.path)
                             staged.append(ie.path)
             else:
@@ -270,7 +277,7 @@ class Repository:
                 untracked_files.append({"path": rel_path, "type": "untracked", "file_type": f_type})
 
         for path, idx_entry in index_entries.items():
-            if path not in scanned_files:
+            if path not in scanned_files and not (self.root / path).exists():
                 unstaged_changes.append(
                     {"path": path, "type": "deleted", "file_type": idx_entry.file_type}
                 )
