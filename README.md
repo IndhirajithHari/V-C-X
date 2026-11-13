@@ -22,7 +22,7 @@
 
 ---
 
-## 🧭 Interactive Navigation Hub
+## 🧭 Navigation Hub
 
 <table>
   <tr>
@@ -115,7 +115,7 @@ Modern engineering teams manage heterogeneous artifacts that exceed the architec
 | **Multi-Domain Merging** | Text line collisions | No merge support | Lock-only concurrency | **3-Way Semantic Merge** for Verilog pinouts, CAD dimensions, and AST declarations. |
 | **Infrastructure Overhead** | High | External LFS server required | Expensive server license | **Zero Runtime Dependencies**: Runs standalone on any system with Python 3.10+. |
 
-<p align="right"><a href="#-interactive-navigation-hub">▲ Back to Navigation</a></p>
+<p align="right"><a href="#-navigation-hub">▲ Back to Navigation</a></p>
 
 ---
 
@@ -144,7 +144,7 @@ All assets are stored in a Content-Addressed Storage (CAS) hierarchy indexed by 
 - **Lock-Free Read Operations**: Packfiles (`.pack`) and binary indices (`.idx`) are strictly immutable. Multiple background processes, CLI tools, or CI workers read from the object store concurrently without read-lock contention.
 - **Resilient Remote Transport**: The push protocol tracks remote chunk offsets. Network partitions, dropped sockets, or mobile disconnections resume seamlessly from the exact byte where transmission stalled.
 
-<p align="right"><a href="#-interactive-navigation-hub">▲ Back to Navigation</a></p>
+<p align="right"><a href="#-navigation-hub">▲ Back to Navigation</a></p>
 
 ---
 
@@ -181,7 +181,7 @@ All assets are stored in a Content-Addressed Storage (CAS) hierarchy indexed by 
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-<p align="right"><a href="#-interactive-navigation-hub">▲ Back to Navigation</a></p>
+<p align="right"><a href="#-navigation-hub">▲ Back to Navigation</a></p>
 
 ---
 
@@ -193,7 +193,7 @@ For latency-critical paths, VCX binds directly to host native libraries via [`ac
 - **Hardware-Assisted Cryptography**: Dispatches hashing to OpenSSL `libcrypto.so.3` (`EVP_Digest*`), utilizing dedicated silicon instructions (**Intel SHA-NI** and **ARMv8 Crypto**).
 - **Constant Working Set ($O(1)$ RAM)**: Memory-mapped streaming limits active memory consumption to **$\approx 64\text{ KB}$**, eliminating process heap exhaustion during 100+ GB file operations.
 
-<p align="right"><a href="#-interactive-navigation-hub">▲ Back to Navigation</a></p>
+<p align="right"><a href="#-navigation-hub">▲ Back to Navigation</a></p>
 
 ---
 
@@ -203,7 +203,7 @@ For latency-critical paths, VCX binds directly to host native libraries via [`ac
 - **Symlink Boundary Isolation**: Symlinks targeting files outside repository boundaries are safely identified and sandboxed.
 - **Deterministic Agent Verification**: Semantic diff outputs pass through rigid schema validators enforcing imperative summaries, fact-grounded deltas, and zero speculative hallucinations.
 
-<p align="right"><a href="#-interactive-navigation-hub">▲ Back to Navigation</a></p>
+<p align="right"><a href="#-navigation-hub">▲ Back to Navigation</a></p>
 
 ---
 
@@ -227,7 +227,7 @@ VCX provides native inspection, magic byte detection, and container recursion ac
 
 </details>
 
-<p align="right"><a href="#-interactive-navigation-hub">▲ Back to Navigation</a></p>
+<p align="right"><a href="#-navigation-hub">▲ Back to Navigation</a></p>
 
 ---
 
@@ -260,7 +260,7 @@ vcx status && vcx gc
 
 </details>
 
-<p align="right"><a href="#-interactive-navigation-hub">▲ Back to Navigation</a></p>
+<p align="right"><a href="#-navigation-hub">▲ Back to Navigation</a></p>
 
 ---
 
@@ -288,61 +288,157 @@ vcx --help
 Click any command below to jump directly to its full syntax, flags, and real-world usage examples:
 
 <table>
-  <tr>
-    <th>Category</th>
-    <th>Quick-Jump Command Palette</th>
-  </tr>
-  <tr>
-    <td><b>1. Setup & Staging</b></td>
-    <td>
-      <a href="#vcx-init-path"><code>vcx init</code></a> • 
-      <a href="#vcx-status"><code>vcx status</code></a> • 
-      <a href="#vcx-add-paths"><code>vcx add</code></a> • 
-      <a href="#vcx-reset-paths"><code>vcx reset</code></a> • 
-      <a href="#vcx-config-key-val---global--l"><code>vcx config</code></a>
-    </td>
-  </tr>
-  <tr>
-    <td><b>2. Commits & Diffs</b></td>
-    <td>
-      <a href="#vcx-commit--m-message---auto"><code>vcx commit</code></a> • 
-      <a href="#vcx-diff-path---semantic"><code>vcx diff</code></a> • 
-      <a href="#vcx-show-target"><code>vcx show</code></a> • 
-      <a href="#vcx-log--n-limit---json"><code>vcx log</code></a>
-    </td>
-  </tr>
-  <tr>
-    <td><b>3. Branch & Merge</b></td>
-    <td>
-      <a href="#vcx-branch-name"><code>vcx branch</code></a> • 
-      <a href="#vcx-checkout-target"><code>vcx checkout</code></a> • 
-      <a href="#vcx-merge-branch"><code>vcx merge</code></a> • 
-      <a href="#vcx-tag-name-target"><code>vcx tag</code></a>
-    </td>
-  </tr>
-  <tr>
-    <td><b>4. Remote & Network</b></td>
-    <td>
-      <a href="#vcx-serve---host-ip---port-port"><code>vcx serve</code></a> • 
-      <a href="#vcx-clone-url-dest"><code>vcx clone</code></a> • 
-      <a href="#vcx-fetch-remote"><code>vcx fetch</code></a> • 
-      <a href="#vcx-push-remote-branch--f"><code>vcx push</code></a> • 
-      <a href="#vcx-remote-addrm-name-url"><code>vcx remote</code></a>
-    </td>
-  </tr>
-  <tr>
-    <td><b>5. Apps, Plugins & Watch</b></td>
-    <td>
-      <a href="#vcx-gc"><code>vcx gc</code></a> • 
-      <a href="#vcx-app-inspect-path--list"><code>vcx app</code></a> • 
-      <a href="#vcx-import-git-path---semantic"><code>vcx import-git</code></a> • 
-      <a href="#vcx-watch---auto-commit---debounce-seconds"><code>vcx watch</code></a> • 
-      <a href="#vcx-agent---input-file"><code>vcx agent</code></a>
-    </td>
-  </tr>
+  <thead>
+    <tr>
+      <th width="20%">Command</th>
+      <th width="48%">Primary Capabilities & Uses</th>
+      <th width="32%">When / Why to Use</th>
+    </tr>
+  </thead>
+  <tbody>
+    <!-- 1. Setup, Staging & State Management -->
+    <tr>
+      <td colspan="3" bgcolor="#161b22"><b>📁 1. Setup, Staging & Configuration</b></td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-init-path"><b><code>vcx init</code></b></a></td>
+      <td>Initializes a new standalone VCX repository with SHA-256 CAS, refs, and index.</td>
+      <td>Run once when creating a new project or versioning an existing folder.</td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-status"><b><code>vcx status</code></b></a></td>
+      <td>Displays working tree status (staged, unstaged, untracked) grouped by domain taxonomy.</td>
+      <td>Inspect pending modifications, added files, and domain classifications.</td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-add-paths"><b><code>vcx add</code></b></a></td>
+      <td>Stages files into <code>.vcx/index</code>. Assets $> 1\text{ MB}$ stream via kernel <code>mmap</code>.</td>
+      <td>Prepare code, CAD models, videos, and datasets for commit with zero RAM bloat.</td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-reset-paths"><b><code>vcx reset</code></b></a></td>
+      <td>Unstages specific files or restores the staging index back to <code>HEAD</code>.</td>
+      <td>Undo accidental staging without modifying or discarding working tree files.</td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-config-key-val---global--l"><b><code>vcx config</code></b></a></td>
+      <td>Reads or sets repository-local or global author metadata and analyzer parameters.</td>
+      <td>Configure <code>user.name</code>, <code>user.email</code>, custom analyzers, or inspect all settings.</td>
+    </tr>
+
+    <!-- 2. Commits, History & Diffs -->
+    <tr>
+      <td colspan="3" bgcolor="#161b22"><b>📝 2. Commits, History & Semantic Diffs</b></td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-commit--m-message---auto"><b><code>vcx commit</code></b></a></td>
+      <td>Records a snapshot into Merkle CAS. <code>--auto</code> triggers Semantic Differ Agent.</td>
+      <td>Permanently save milestones with manual messages or AI-inferred intent.</td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-diff-path---semantic"><b><code>vcx diff</code></b></a></td>
+      <td>Diffs working tree against index. <code>--semantic</code> outputs structured JSON deltas.</td>
+      <td>Inspect geometric bounding shifts, AST deltas, CDC mutations, or raw diffs.</td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-show-target"><b><code>vcx show</code></b></a></td>
+      <td>Displays commit metadata, parent SHAs, and extracted domain facts for any ref.</td>
+      <td>Audit exact technical deltas, author attribution, and tags for any historical point.</td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-log--n-limit---json"><b><code>vcx log</code></b></a></td>
+      <td>Traverses the commit ancestry graph. <code>--json</code> emits structured records.</td>
+      <td>Inspect project timeline, audit changes, or pipe history to visualization tools.</td>
+    </tr>
+
+    <!-- 3. Branching, Merging & Release Tags -->
+    <tr>
+      <td colspan="3" bgcolor="#161b22"><b>🌿 3. Branching, Merging & Release Tags</b></td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-branch-name"><b><code>vcx branch</code></b></a></td>
+      <td>Lists all local branches or creates a new branch pointer at current <code>HEAD</code>.</td>
+      <td>Isolate experimental features, CAD redesigns, or release branches.</td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-checkout-target"><b><code>vcx checkout</code></b></a></td>
+      <td>Switches the active branch and synchronizes working tree files to target commit.</td>
+      <td>Move between branches, work on different features, or restore files.</td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-merge-branch"><b><code>vcx merge</code></b></a></td>
+      <td>Executes multi-domain 3-way semantic merge with common ancestor detection.</td>
+      <td>Reconcile hardware pinouts, CAD dimensions, and AST declarations without line conflicts.</td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-tag-name-target"><b><code>vcx tag</code></b></a></td>
+      <td>Creates or lists release tags pointing to specific commit cryptographic SHAs.</td>
+      <td>Mark production milestones (e.g. <code>v1.0.0</code>, <code>tapeout-rev2</code>).</td>
+    </tr>
+
+    <!-- 4. Remote Collaboration & Resumable Transport -->
+    <tr>
+      <td colspan="3" bgcolor="#161b22"><b>🌐 4. Remote Collaboration & Resumable Transport</b></td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-serve---host-ip---port-port"><b><code>vcx serve</code></b></a></td>
+      <td>Launches the built-in HTTP server daemon supporting clone, fetch, and push.</td>
+      <td>Host repositories locally or on central servers for team collaboration.</td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-clone-url-dest"><b><code>vcx clone</code></b></a></td>
+      <td>Clones a remote repository over HTTP or from a local filesystem path.</td>
+      <td>Download a full repository replica with complete Merkle history and working tree.</td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-fetch-remote"><b><code>vcx fetch</code></b></a></td>
+      <td>Downloads missing pack objects from remote and updates remote-tracking refs.</td>
+      <td>Stay synchronized with remote changes without touching your working tree.</td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-push-remote-branch--f"><b><code>vcx push</code></b></a></td>
+      <td>Pushes local commits to remote via <b>Resumable HTTP Range Protocol</b>.</td>
+      <td>Upload commits; self-heals and resumes across network drops without restarting.</td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-remote-addrm-name-url"><b><code>vcx remote</code></b></a></td>
+      <td>Manages tracked remote repository URLs stored in <code>.vcx/remotes.json</code>.</td>
+      <td>Link repositories to origin servers, mirrors, or local network shares.</td>
+    </tr>
+
+    <!-- 5. Application Dissection, Plugins & Automation -->
+    <tr>
+      <td colspan="3" bgcolor="#161b22"><b>⚙️ 5. Application Dissection, Plugins & Automation</b></td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-gc"><b><code>vcx gc</code></b></a></td>
+      <td>Consolidates loose objects into <code>VID2</code> binary packs and prunes unreachable SHAs.</td>
+      <td>Optimize storage footprint, free disk inodes, and accelerate lookup speeds.</td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-app-inspect-path--list"><b><code>vcx app</code></b></a></td>
+      <td>Inspects creative app project metadata (DAWs, 3D, VFX) or catalogs format support.</td>
+      <td>Inspect Ableton clips, Blender datablocks, Reaper tracks, or browse 500+ formats.</td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-import-git-path---semantic"><b><code>vcx import-git</code></b></a></td>
+      <td>Imports an existing Git repository and converts history into native VCX Merkle CAS.</td>
+      <td>Migrate from legacy Git to 100% native VCX with zero Git runtime dependency.</td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-watch---auto-commit---debounce-seconds"><b><code>vcx watch</code></b></a></td>
+      <td>Monitors workspace in real-time via Linux <code>pyinotify</code> with debounced auto-commit.</td>
+      <td>Maintain hands-free automated checkpoints while working in creative or CAD software.</td>
+    </tr>
+    <tr>
+      <td><a href="#vcx-agent---input-file"><b><code>vcx agent</code></b></a></td>
+      <td>Invokes the Semantic Differ Agent directly from stdin or file with JSON payload.</td>
+      <td>Integrate semantic intent inference into headless CI/CD pipelines and external tools.</td>
+    </tr>
+  </tbody>
 </table>
 
-<p align="right"><a href="#-interactive-navigation-hub">▲ Back to Navigation</a></p>
+<p align="right"><a href="#-navigation-hub">▲ Back to Navigation</a></p>
 
 ---
 
@@ -555,7 +651,7 @@ vcx agent --input delta_facts.json
 
 </details>
 
-<p align="right"><a href="#-interactive-navigation-hub">▲ Back to Navigation</a></p>
+<p align="right"><a href="#-navigation-hub">▲ Back to Navigation</a></p>
 
 ---
 
@@ -573,7 +669,7 @@ Ran 81 tests in 2.862s
 OK
 ```
 
-<p align="right"><a href="#-interactive-navigation-hub">▲ Back to Navigation</a></p>
+<p align="right"><a href="#-navigation-hub">▲ Back to Navigation</a></p>
 
 ---
 
