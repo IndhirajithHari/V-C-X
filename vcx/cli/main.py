@@ -323,6 +323,107 @@ def cmd_gc(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_remote(args: argparse.Namespace) -> int:
+    try:
+        repo = Repository.find()
+    except FileNotFoundError as e:
+        print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+    if args.action == "add":
+        if not args.name or not args.url:
+            print("error: 'remote add' requires name and url", file=sys.stderr)
+            return 1
+        repo.remotes.add(args.name, args.url)
+        print(f"Added remote '{args.name}' -> {args.url}")
+        return 0
+    elif args.action == "rm":
+        if not args.name:
+            print("error: 'remote rm' requires name", file=sys.stderr)
+            return 1
+        repo.remotes.remove(args.name)
+        print(f"Removed remote '{args.name}'")
+        return 0
+
+    remotes = repo.remotes.list_all()
+    if not remotes:
+        print("No remotes configured.")
+    else:
+        for name, url in remotes.items():
+            print(f"{name}\t{url}")
+    return 0
+
+
+def cmd_clone(args: argparse.Namespace) -> int:
+    from vcx.remote.transport import RemoteTransport
+    dest = args.dest or Path(args.url.rstrip("/").split("/")[-1])
+    try:
+        print(f"Cloning from '{args.url}' into '{dest}'...")
+        repo = RemoteTransport.clone(args.url, dest)
+        print(f"Clone complete. Head at {repo.head_commit_sha[:8] if repo.head_commit_sha else 'empty'}")
+        return 0
+    except Exception as e:
+        print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_fetch(args: argparse.Namespace) -> int:
+    from vcx.remote.transport import RemoteTransport
+    try:
+        repo = Repository.find()
+    except FileNotFoundError as e:
+        print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        print(f"Fetching from remote '{args.remote}'...")
+        refs = RemoteTransport.fetch(repo, remote_name=args.remote)
+        if not refs:
+            print("Already up to date.")
+        else:
+            for branch, sha in refs.items():
+                print(f"  * [{args.remote}/{branch}] -> {sha[:8]}")
+        return 0
+    except Exception as e:
+        print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_push(args: argparse.Namespace) -> int:
+    from vcx.remote.transport import RemoteTransport
+    try:
+        repo = Repository.find()
+    except FileNotFoundError as e:
+        print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        print(f"Pushing to '{args.remote}'...")
+        msg = RemoteTransport.push(repo, remote_name=args.remote, branch=args.branch, force=args.force)
+        print(msg)
+        return 0
+    except Exception as e:
+        print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    from vcx.remote.server import VcxServer
+    try:
+        repo = Repository.find()
+    except FileNotFoundError as e:
+        print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+    server = VcxServer(repo, host=args.host, port=args.port)
+    try:
+        server.start(background=False)
+    except KeyboardInterrupt:
+        print("\nStopping VCX Server...")
+        server.stop()
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="vcx",
@@ -391,6 +492,37 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_agent = subparsers.add_parser("agent", help="Directly invoke Semantic Differ Agent with JSON payload")
     p_agent.add_argument("--input", "-i", help="Path to input JSON payload (reads from stdin if omitted)")
     p_agent.set_defaults(func=cmd_agent)
+
+    # remote
+    p_remote = subparsers.add_parser("remote", help="Manage set of tracked repositories")
+    p_remote.add_argument("action", nargs="?", choices=["add", "rm"], help="Action to perform (add/rm)")
+    p_remote.add_argument("name", nargs="?", help="Remote repository name")
+    p_remote.add_argument("url", nargs="?", help="Remote repository URL or path")
+    p_remote.set_defaults(func=cmd_remote)
+
+    # clone
+    p_clone = subparsers.add_parser("clone", help="Clone a repository into a new directory")
+    p_clone.add_argument("url", help="Repository URL or path to clone from")
+    p_clone.add_argument("dest", nargs="?", help="Optional destination directory")
+    p_clone.set_defaults(func=cmd_clone)
+
+    # fetch
+    p_fetch = subparsers.add_parser("fetch", help="Download objects and refs from another repository")
+    p_fetch.add_argument("remote", nargs="?", default="origin", help="Remote repository name")
+    p_fetch.set_defaults(func=cmd_fetch)
+
+    # push
+    p_push = subparsers.add_parser("push", help="Update remote refs along with associated objects")
+    p_push.add_argument("remote", nargs="?", default="origin", help="Remote repository name")
+    p_push.add_argument("branch", nargs="?", default=None, help="Branch name to push")
+    p_push.add_argument("-f", "--force", action="store_true", help="Force push")
+    p_push.set_defaults(func=cmd_push)
+
+    # serve
+    p_serve = subparsers.add_parser("serve", help="Run HTTP server for smart remote transport")
+    p_serve.add_argument("--host", default="127.0.0.1", help="Host interface to bind")
+    p_serve.add_argument("--port", type=int, default=8000, help="Port to bind")
+    p_serve.set_defaults(func=cmd_serve)
 
     args = parser.parse_args(argv)
     return args.func(args)

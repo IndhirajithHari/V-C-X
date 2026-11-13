@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 import xml.etree.ElementTree as ET
 
 from vcx.diff.analyzers.base import AnalysisResult, BaseAnalyzer
+from vcx.diff.cad_engine import CadTessellator, StepBrepParser
 
 
 class Cad3DAnalyzer(BaseAnalyzer):
@@ -117,24 +118,24 @@ class Cad3DAnalyzer(BaseAnalyzer):
         return result
 
     def _parse_step_content(self, content: bytes) -> Dict[str, Any]:
-        """Parse STEP / STP boundary-representation files without converting to mesh."""
+        """Parse STEP / STP boundary-representation solids and extract 3D extents."""
         text = content.decode("utf-8", errors="replace")
+        parser = StepBrepParser(text)
         features: Dict[str, Any] = {}
 
         # Look for geometric dimensions or thickness/fillet annotations in comments/entities
         for m in re.finditer(r"(Extrusion|Thickness|Length|Radius|Fillet|Chamfer)\s*[:=]\s*([0-9.]+)\s*(mm)?", text, re.I):
             features[m.group(1)] = f"{m.group(2)}{m.group(3) or 'mm'}"
 
-        # Count boundary representation entities
-        solids = len(re.findall(r"MANIFOLD_SOLID_BREP", text))
-        faces = len(re.findall(r"ADVANCED_FACE", text))
-        cylinders = len(re.findall(r"CYLINDRICAL_SURFACE", text))
-
+        dims = parser.dimensions_mm
         mesh_stats = {
             "format": "STEP_BREP",
-            "solids": solids,
-            "faces": faces,
-            "cylindrical_surfaces": cylinders,
+            "solids": parser.solids,
+            "faces": parser.faces,
+            "edges": parser.edges,
+            "closed_shells": parser.closed_shells,
+            "bounding_box_mm": list(dims) if dims else None,
+            "is_manifold": parser.solids > 0 or parser.closed_shells > 0,
         }
         return {"parametric_features": features, "mesh_stats": mesh_stats}
 
@@ -233,6 +234,6 @@ class Cad3DAnalyzer(BaseAnalyzer):
                 vision_parts.append(f"Viewport 3D bounding box resized to {n_box}mm")
 
         raw_diff = "\n".join(diff_lines) if diff_lines else f"Binary CAD model updated ({new_meta.get('file_size', 0)} bytes)"
-        vision_summary = "; ".join(vision_parts) if vision_parts else "3D viewport inspection confirms updated topological mesh geometry."
+        vision_summary = CadTessellator.generate_vision_summary(old_meta, new_meta, file_name)
 
         return facts, raw_diff, vision_summary

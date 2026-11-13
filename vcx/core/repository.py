@@ -27,6 +27,43 @@ class Repository:
         self.delta_engine = DeltaEngine()
         self.agent = SemanticDifferAgent()
 
+    @property
+    def remotes(self):
+        from vcx.remote.transport import RemoteManager
+        return RemoteManager(self.root)
+
+    def _collect_reachable_shas(self, root_shas: List[str]) -> Set[str]:
+        """Collect all reachable commit, tree, and blob SHAs from a list of commit SHAs."""
+        reachable: Set[str] = set()
+        queue = list(root_shas)
+        visited_commits = set()
+
+        while queue:
+            c_sha = queue.pop(0)
+            if c_sha in visited_commits:
+                continue
+            visited_commits.add(c_sha)
+            reachable.add(c_sha)
+            try:
+                commit = self.store.read_commit(c_sha)
+                queue.extend(commit.parent_shas)
+
+                tree_queue = [commit.tree_sha]
+                while tree_queue:
+                    t_sha = tree_queue.pop(0)
+                    reachable.add(t_sha)
+                    try:
+                        entries = self.store.read_tree(t_sha)
+                        for e in entries:
+                            reachable.add(e.sha)
+                            if e.obj_type == "tree" or e.mode == FileMode.DIRECTORY.value:
+                                tree_queue.append(e.sha)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        return reachable
+
     @classmethod
     def init(cls, root_dir: Path | str) -> Repository:
         """Initialize a new VCX repository."""

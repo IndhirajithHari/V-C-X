@@ -109,6 +109,48 @@ class ObjectStore:
 
         raise FileNotFoundError(f"VCX object not found: {sha}")
 
+    def has_object(self, sha: str) -> bool:
+        """Check if an object exists either loose or in packfiles."""
+        obj_path = self.objects_dir / sha[:2] / sha[2:]
+        if obj_path.exists() and obj_path.stat().st_size > 0:
+            return True
+        for reader in self._get_pack_readers():
+            if reader.has_object(sha):
+                return True
+        return False
+
+    def _rebuild_pack_index(self, pack_path: Path) -> Path:
+        """Reconstruct .idx index for a .pack file."""
+        import io
+        import json
+        import struct
+
+        idx_path = pack_path.with_suffix(".idx")
+        with open(pack_path, "rb") as f:
+            magic = f.read(4)
+            if magic != b"VPK1":
+                raise ValueError("Invalid packfile magic")
+            num_objects = struct.unpack(">I", f.read(4))[0]
+            entries = {}
+            for _ in range(num_objects):
+                offset = f.tell()
+                sha = f.read(32).hex()
+                type_byte = struct.unpack(">B", f.read(1))[0]
+                uncompressed_size = struct.unpack(">Q", f.read(8))[0]
+                compressed_size = struct.unpack(">Q", f.read(8))[0]
+                f.seek(compressed_size, io.SEEK_CUR)
+
+                type_name = {1: "blob", 2: "tree", 3: "commit", 4: "tag"}.get(type_byte, "blob")
+                entries[sha] = {
+                    "offset": offset,
+                    "size": uncompressed_size,
+                    "type": type_name,
+                }
+
+        idx_data = {"version": 1, "count": num_objects, "entries": entries}
+        idx_path.write_text(json.dumps(idx_data, indent=2), encoding="utf-8")
+        return idx_path
+
     def write_blob(self, content: bytes) -> str:
         """Store raw file content as a blob."""
         return self.write_object(ObjectType.BLOB, content)

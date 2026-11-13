@@ -1,6 +1,6 @@
 # VCX (Version Control for Everything)
 
-[![Tests](https://img.shields.io/badge/tests-40%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-49%20passed-brightgreen.svg)]()
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)]()
 [![Architecture](https://img.shields.io/badge/inspired%20by-build--your--own--x-orange.svg)](https://github.com/codecrafters-io/build-your-own-x)
 
@@ -20,7 +20,17 @@ Inspired by the Git internals from [codecrafters-io/build-your-own-x](https://gi
    - Compressed archive storage (`.vcx/objects/pack/pack-<hash>.pack`) with high-speed indexed binary lookup (`.idx`).
    - `vcx gc` identifies reachable objects from all branch heads, consolidates loose files into packfiles, and safely prunes unreferenced dangling objects to reclaim disk space.
 
-3. **Multi-Domain 3-Way Semantic Merge (`vcx merge <branch>`)**:
+3. **Smart Remote Transfer Protocol (`vcx clone`, `vcx fetch`, `vcx push`, `vcx serve`)**:
+   - Git-compatible smart transfer protocol operating across local paths, network filesystems, and HTTP endpoints.
+   - Built-in lightweight HTTP server (`vcx serve`) exposing endpoints (`/info/refs`, `/vcx-upload-pack`, `/vcx-receive-pack`).
+   - Fast-forward commit validation and safe remote tracking refs (`refs/remotes/<remote>/<branch>`).
+
+4. **CAD Solid B-Rep & Mesh Tessellation Engine (`cad_engine`)**:
+   - Dedicated ISO-10303-21 STEP boundary representation parser (`MANIFOLD_SOLID_BREP`, `ADVANCED_FACE`, `CLOSED_SHELL`, `EDGE_CURVE`).
+   - Exact 3D point cloud extent extraction and bounding box dimension deltas (`dx, dy, dz` in millimeters).
+   - Multimodal 3D viewport vision summaries detailing topological shifts (vertex/face deltas) and parametric feature evolution.
+
+5. **Multi-Domain 3-Way Semantic Merge (`vcx merge <branch>`)**:
    - **Hardware / EDA (Verilog/SystemVerilog & Floorplans)**: Synthesizes non-conflicting port additions, opcode decoders, and independent macro coordinate shifts without textual merge conflicts.
    - **CAD / 3D Parametric (FreeCAD XML & STEP)**: Resolves independent parametric dimensions (e.g. branch A increases base extrusion while branch B adds an edge fillet). Detects true parametric collisions when identical dimensions collide.
    - **Source Code (Python AST & Code)**: Combines non-colliding function and class declarations across branches.
@@ -110,14 +120,34 @@ Pack loose files into a compressed `.pack` archive and prune unreachable objects
 vcx gc
 ```
 
-### 7. View Commit History
+### 7. Remote Repositories & Smart Network Transport
+```bash
+# Add or remove remotes
+vcx remote add origin https://vcx.example.com/repos/hardware-core
+vcx remote
+
+# Clone a local or remote repository
+vcx clone /shared/repos/eda_core ./local_eda
+vcx clone http://127.0.0.1:8000 ./cloned_repo
+
+# Fetch changes and sync remote tracking refs
+vcx fetch origin
+
+# Push local commits to remote branch (with fast-forward safety)
+vcx push origin main
+
+# Host a local repository via HTTP smart transport server
+vcx serve --host 127.0.0.1 --port 8000
+```
+
+### 8. View Commit History
 ```bash
 vcx log
 # Or structured JSON history:
 vcx log --json
 ```
 
-### 8. Run the Autonomous File Watcher
+### 9. Run the Autonomous File Watcher
 ```bash
 # Live stream semantic diffs to terminal on save:
 vcx watch
@@ -126,7 +156,7 @@ vcx watch
 vcx watch --auto-commit --debounce 0.8
 ```
 
-### 9. Run Semantic Differ Agent Directly (CI / Tool Pipeline)
+### 10. Run Semantic Differ Agent Directly (CI / Tool Pipeline)
 ```bash
 echo '{
   "file_name": "riscv_alu.v",
@@ -163,4 +193,4 @@ Execute the unit tests:
 ```bash
 python3 -m unittest discover tests -v
 ```
-*(40 tests passing with 100% success rate)*
+*(49 tests passing with 100% success rate)*
