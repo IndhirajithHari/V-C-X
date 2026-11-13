@@ -33,7 +33,13 @@ class _NativeBackend:
         import sys
         candidates = []
         if sys.platform == "win32":
-            candidates = ["msvcrt.dll", "ucrtbase.dll", ctypes.util.find_library("msvcrt")]
+            candidates = ["msvcrt.dll", "ucrtbase.dll"]
+            try:
+                cand = ctypes.util.find_library("msvcrt")
+                if cand:
+                    candidates.append(cand)
+            except Exception:
+                pass
         elif sys.platform == "darwin":
             candidates = [ctypes.util.find_library("c"), "/usr/lib/libc.dylib"]
         else:
@@ -56,12 +62,17 @@ class _NativeBackend:
         candidates = []
         if sys.platform == "win32":
             candidates = [
-                ctypes.util.find_library("crypto"),
-                ctypes.util.find_library("libcrypto"),
                 "libcrypto-3-x64.dll",
                 "libcrypto-1_1-x64.dll",
                 "libcrypto.dll",
             ]
+            for name in ("crypto", "libcrypto"):
+                try:
+                    c = ctypes.util.find_library(name)
+                    if c:
+                        candidates.append(c)
+                except Exception:
+                    pass
         elif sys.platform == "darwin":
             candidates = [
                 ctypes.util.find_library("crypto"),

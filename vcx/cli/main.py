@@ -323,6 +323,21 @@ def cmd_gc(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pack(args: argparse.Namespace) -> int:
+    try:
+        repo = Repository.find()
+    except FileNotFoundError as e:
+        print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+    pack_path, idx_path = repo.pack()
+    if pack_path:
+        print(f"Packed repository objects into {pack_path.name}")
+    else:
+        print("All reachable repository objects are already packed.")
+    return 0
+
+
 def cmd_remote(args: argparse.Namespace) -> int:
     try:
         repo = Repository.find()
@@ -675,6 +690,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     # gc
     p_gc = subparsers.add_parser("gc", help="Pack repository objects and clean unreachable files")
     p_gc.set_defaults(func=cmd_gc)
+
+    # pack
+    p_pack = subparsers.add_parser("pack", help="Consolidate loose objects into VID2 binary packfile")
+    p_pack.set_defaults(func=cmd_pack)
 
     # watch
     p_watch = subparsers.add_parser("watch", help="Watch workspace and generate semantic commit messages")

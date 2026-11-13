@@ -696,6 +696,19 @@ class Repository:
 
         return self.store.gc(reachable)
 
+    def pack(self) -> Tuple[Optional[Path], Optional[Path]]:
+        """Pack reachable loose objects into a high-performance VID2 packfile."""
+        stats = self.gc()
+        if stats.get("packfile"):
+            pack_path = self.store.pack_dir / stats["packfile"]
+            idx_path = pack_path.with_suffix(".idx")
+            return pack_path, idx_path
+        existing_packs = list(self.store.pack_dir.glob("*.pack"))
+        if existing_packs:
+            p = existing_packs[0]
+            return p, p.with_suffix(".idx")
+        return None, None
+
     def create_tag(self, name: str, target_sha: Optional[str] = None) -> str:
         """Create a tag pointing to a commit SHA (defaults to HEAD)."""
         sha = target_sha or self.head_commit_sha

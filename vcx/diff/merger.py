@@ -44,7 +44,10 @@ class SemanticMerger:
             return self._merge_eda(base, ours_bytes, theirs_bytes, file_name)
 
         # 2. CAD / 3D Parametric Models
-        if file_type.startswith("cad/"):
+        if file_type.startswith("cad/") or (
+            file_name.lower().endswith((".xml", ".fcstd", ".fcproj"))
+            and (b"<Document" in (ours_bytes or b"") or b"<Document" in (theirs_bytes or b""))
+        ):
             return self._merge_cad(base, ours_bytes, theirs_bytes, file_name)
 
         # 3. Databases and Logs
