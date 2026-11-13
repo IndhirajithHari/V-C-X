@@ -153,23 +153,24 @@ class Repository:
 
     def _sanitize_path(self, path_str: str | Path) -> str:
         """Sanitize path and ensure it is strictly confined within the repository root."""
-        raw = str(path_str).strip()
-        if os.path.isabs(raw) or raw.startswith("/") or raw.startswith("\\"):
+        raw = str(path_str).strip().replace("\\", "/")
+        if os.path.isabs(raw) or raw.startswith("/"):
             raise ValueError(f"Path traversal detected (absolute path not permitted): {path_str}")
-        norm = os.path.normpath(raw)
+        norm = os.path.normpath(raw).replace("\\", "/")
         if norm.startswith("..") or norm == "..":
             raise ValueError(f"Path traversal detected (directory escape): {path_str}")
         resolved = (self.root / norm).resolve()
         if not resolved.is_relative_to(self.root):
             raise ValueError(f"Path escapes repository root: {path_str}")
-        return str(resolved.relative_to(self.root))
+        return resolved.relative_to(self.root).as_posix()
 
     def add(self, paths: List[str | Path]) -> List[str]:
         """Add files to staging index and store blobs."""
         staged: List[str] = []
         for p in paths:
+            clean_p = str(p).replace("\\", "/")
             try:
-                target = (self.root / p).resolve()
+                target = (self.root / clean_p).resolve()
                 if not target.is_relative_to(self.root):
                     continue
             except Exception:
@@ -178,7 +179,7 @@ class Repository:
             if not target.exists():
                 # Handle deleted file
                 try:
-                    rel = str(target.relative_to(self.root))
+                    rel = target.relative_to(self.root).as_posix()
                     if rel in self.index:
                         self.index.remove(rel)
                         staged.append(rel)
@@ -187,18 +188,18 @@ class Repository:
                 continue
 
             if target.is_dir():
-                dir_rel = str(target.relative_to(self.root))
+                dir_rel = target.relative_to(self.root).as_posix()
                 found_in_dir = set()
                 patterns = self._load_ignore_patterns()
                 for root, dirs, files in os.walk(target):
                     dirs[:] = [
                         d for d in dirs
                         if d not in self.IGNORE_DIRS
-                        and not self._is_ignored(str((Path(root) / d).relative_to(self.root)), is_dir=True, patterns=patterns)
+                        and not self._is_ignored((Path(root) / d).relative_to(self.root).as_posix(), is_dir=True, patterns=patterns)
                     ]
                     for f in files:
                         file_path = Path(root) / f
-                        rel_path = str(file_path.relative_to(self.root))
+                        rel_path = file_path.relative_to(self.root).as_posix()
                         if self._is_ignored(rel_path, is_dir=False, patterns=patterns):
                             continue
                         found_in_dir.add(rel_path)
@@ -213,7 +214,7 @@ class Repository:
                             self.index.remove(ie.path)
                             staged.append(ie.path)
             else:
-                rel_path = str(target.relative_to(self.root))
+                rel_path = target.relative_to(self.root).as_posix()
                 self._stage_file(target, rel_path)
                 staged.append(rel_path)
 
@@ -333,11 +334,11 @@ class Repository:
         for root, dirs, files in os.walk(self.root):
             dirs[:] = [
                 d for d in dirs
-                if not self._is_ignored(str((Path(root) / d).relative_to(self.root)), is_dir=True, patterns=patterns)
+                if not self._is_ignored((Path(root) / d).relative_to(self.root).as_posix(), is_dir=True, patterns=patterns)
             ]
             for f in files:
                 p = Path(root) / f
-                rel = str(p.relative_to(self.root))
+                rel = p.relative_to(self.root).as_posix()
                 if not self._is_ignored(rel, is_dir=False, patterns=patterns):
                     results.add(rel)
         return results

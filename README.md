@@ -11,7 +11,8 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/status-Production%20Ready-success.svg" alt="Production Ready"/>
-  <img src="https://img.shields.io/badge/tests-81%20passed-brightgreen.svg" alt="Tests"/>
+  <img src="https://img.shields.io/badge/tests-85%20passed-brightgreen.svg" alt="Tests"/>
+  <img src="https://img.shields.io/badge/os-Linux%20%7C%20macOS%20%7C%20Windows-blue.svg" alt="Cross Platform"/>
   <img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python"/>
   <img src="https://img.shields.io/badge/throughput-3.3%2B%20GB%2Fs%20SIMD-orange.svg" alt="SIMD Throughput"/>
   <img src="https://img.shields.io/badge/memory-O(1)%20RAM%20Streaming-purple.svg" alt="O(1) RAM"/>
@@ -556,7 +557,7 @@ python3 -m unittest discover tests -v
 ```
 
 ```text
-Ran 81 tests in 2.862s
+Ran 85 tests in 2.840s
 
 OK
 ```

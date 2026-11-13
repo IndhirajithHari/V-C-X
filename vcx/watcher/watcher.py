@@ -144,7 +144,7 @@ class WorkspaceWatcher:
                     p = Path(event.pathname)
                     if not self.watcher._should_ignore(p) and p.is_file():
                         try:
-                            rel = str(p.relative_to(self.watcher.repo.root))
+                            rel = p.relative_to(self.watcher.repo.root).as_posix()
                             self.watcher.trigger_change(rel)
                         except ValueError:
                             pass
@@ -186,7 +186,7 @@ class WorkspaceWatcher:
                         p = Path(root) / f
                         if self._should_ignore(p):
                             continue
-                        rel = str(p.relative_to(self.repo.root))
+                        rel = p.relative_to(self.repo.root).as_posix()
                         try:
                             mtime = p.stat().st_mtime
                             if rel not in last_mtimes or last_mtimes[rel] != mtime:

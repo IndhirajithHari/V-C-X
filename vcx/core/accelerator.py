@@ -30,47 +30,90 @@ class _NativeBackend:
         self._init_libcrypto()
 
     def _init_libc(self) -> None:
-        try:
-            libc_path = ctypes.util.find_library("c")
-            if libc_path:
-                self._libc = ctypes.CDLL(libc_path)
+        import sys
+        candidates = []
+        if sys.platform == "win32":
+            candidates = ["msvcrt.dll", "ucrtbase.dll", ctypes.util.find_library("msvcrt")]
+        elif sys.platform == "darwin":
+            candidates = [ctypes.util.find_library("c"), "/usr/lib/libc.dylib"]
+        else:
+            candidates = [ctypes.util.find_library("c"), "libc.so.6"]
+
+        for cand in candidates:
+            if not cand:
+                continue
+            try:
+                self._libc = ctypes.CDLL(cand)
                 self._libc.memchr.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_size_t]
                 self._libc.memchr.restype = ctypes.c_void_p
                 self.has_c_runtime = True
-        except Exception:
-            self._libc = None
-            self.has_c_runtime = False
+                break
+            except Exception:
+                continue
 
     def _init_libcrypto(self) -> None:
-        try:
-            crypto_path = ctypes.util.find_library("crypto")
-            if crypto_path:
-                self._libcrypto = ctypes.CDLL(crypto_path)
-                self._evp_sha256 = self._libcrypto.EVP_sha256
-                self._evp_sha256.restype = ctypes.c_void_p
+        import sys
+        candidates = []
+        if sys.platform == "win32":
+            candidates = [
+                ctypes.util.find_library("crypto"),
+                ctypes.util.find_library("libcrypto"),
+                "libcrypto-3-x64.dll",
+                "libcrypto-1_1-x64.dll",
+                "libcrypto.dll",
+            ]
+        elif sys.platform == "darwin":
+            candidates = [
+                ctypes.util.find_library("crypto"),
+                "/opt/homebrew/lib/libcrypto.dylib",
+                "/usr/local/opt/openssl/lib/libcrypto.dylib",
+                "/usr/lib/libcrypto.dylib",
+            ]
+        else:
+            candidates = [
+                ctypes.util.find_library("crypto"),
+                "libcrypto.so.3",
+                "libcrypto.so.1.1",
+                "libcrypto.so",
+            ]
 
-                self._evp_ctx_new = self._libcrypto.EVP_MD_CTX_new
-                self._evp_ctx_new.restype = ctypes.c_void_p
+        for cand in candidates:
+            if not cand:
+                continue
+            try:
+                lib = ctypes.CDLL(cand)
+                evp_sha256 = lib.EVP_sha256
+                evp_sha256.restype = ctypes.c_void_p
 
-                self._evp_ctx_free = self._libcrypto.EVP_MD_CTX_free
-                self._evp_ctx_free.argtypes = [ctypes.c_void_p]
+                ctx_new = lib.EVP_MD_CTX_new
+                ctx_new.restype = ctypes.c_void_p
 
-                self._evp_digest_init = self._libcrypto.EVP_DigestInit_ex
-                self._evp_digest_init.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
-                self._evp_digest_init.restype = ctypes.c_int
+                ctx_free = lib.EVP_MD_CTX_free
+                ctx_free.argtypes = [ctypes.c_void_p]
 
-                self._evp_digest_update = self._libcrypto.EVP_DigestUpdate
-                self._evp_digest_update.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t]
-                self._evp_digest_update.restype = ctypes.c_int
+                d_init = lib.EVP_DigestInit_ex
+                d_init.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+                d_init.restype = ctypes.c_int
 
-                self._evp_digest_final = self._libcrypto.EVP_DigestFinal_ex
-                self._evp_digest_final.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_uint)]
-                self._evp_digest_final.restype = ctypes.c_int
+                d_update = lib.EVP_DigestUpdate
+                d_update.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t]
+                d_update.restype = ctypes.c_int
 
+                d_final = lib.EVP_DigestFinal_ex
+                d_final.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_uint)]
+                d_final.restype = ctypes.c_int
+
+                self._libcrypto = lib
+                self._evp_sha256 = evp_sha256
+                self._evp_ctx_new = ctx_new
+                self._evp_ctx_free = ctx_free
+                self._evp_digest_init = d_init
+                self._evp_digest_update = d_update
+                self._evp_digest_final = d_final
                 self.has_crypto_accel = True
-        except Exception:
-            self._libcrypto = None
-            self.has_crypto_accel = False
+                break
+            except Exception:
+                continue
 
 
 _BACKEND = _NativeBackend()
