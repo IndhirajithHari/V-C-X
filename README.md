@@ -5,18 +5,18 @@
 <h1 align="center">VCX: Version Control for Everything</h1>
 
 <p align="center">
-  <b>High-Throughput, Multi-Domain Version Control System & Autonomous Semantic Differ Engine</b><br>
-  <i>Universal Support for Source Code, Hardware/EDA, CAD/3D, Video, Audio, Creative Suites, Columnar Data, Firmware & Binaries</i>
+  <b>Industrial-Grade, Multi-Domain Version Control System & Autonomous Semantic Differ Engine</b><br>
+  <i>Mission-Critical Versioning for Hardware/EDA, CAD/3D Solids, Video, Audio DAWs, Creative Suites, Columnar Data & Software</i>
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/status-Production%20Ready-success.svg" alt="Production Ready"/>
   <img src="https://img.shields.io/badge/tests-81%20passed-brightgreen.svg" alt="Tests"/>
   <img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python"/>
   <img src="https://img.shields.io/badge/throughput-3.3%2B%20GB%2Fs%20SIMD-orange.svg" alt="SIMD Throughput"/>
   <img src="https://img.shields.io/badge/memory-O(1)%20RAM%20Streaming-purple.svg" alt="O(1) RAM"/>
-  <img src="https://img.shields.io/badge/remote-Resumable%20HTTP-teal.svg" alt="Resumable Transport"/>
-  <img src="https://img.shields.io/badge/runtime-100%25%20Git--Independent-success.svg" alt="Zero Git Dependency"/>
-  <a href="https://github.com/codecrafters-io/build-your-own-x"><img src="https://img.shields.io/badge/inspired%20by-build--your--own--x-orange.svg" alt="Build Your Own X"/></a>
+  <img src="https://img.shields.io/badge/resilience-Crash%20Safe%20ACID-teal.svg" alt="Crash Safe"/>
+  <img src="https://img.shields.io/badge/transport-Resumable%20HTTP-blueviolet.svg" alt="Resumable Transport"/>
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/>
 </p>
 
@@ -24,172 +24,126 @@
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Key Features & Architectural Advantages](#key-features--architectural-advantages)
-- [Algorithmic Complexity & Performance](#algorithmic-complexity--performance)
-- [How It Works (System Architecture)](#how-it-works-system-architecture)
-  - [1. Streaming Content-Addressed Storage (`mmap`)](#1-streaming-content-addressed-storage-mmap)
-  - [2. Hierarchical Merkle Trees](#2-hierarchical-merkle-trees)
-  - [3. Binary Packfile v2 (`VID2`) & Garbage Collection](#3-binary-packfile-v2-vid2--garbage-collection)
-  - [4. C/SIMD Hardware Accelerator (`vcx/core/accelerator.py`)](#4-csimd-hardware-accelerator)
-  - [5. Resumable Remote Transfer Protocol](#5-resumable-remote-transfer-protocol)
-  - [6. Multi-Domain 3-Way Semantic Merge](#6-multi-domain-3-way-semantic-merge)
-  - [7. CAD Solid B-Rep & Mesh Tessellation Engine](#7-cad-solid-b-rep--mesh-tessellation-engine)
-  - [8. Autonomous Semantic Differ Agent](#8-autonomous-semantic-differ-agent)
+- [Executive Summary](#executive-summary)
+- [Enterprise Capabilities & Comparative Matrix](#enterprise-capabilities--comparative-matrix)
+- [Industrial System Guarantees & Fault Tolerance](#industrial-system-guarantees--fault-tolerance)
+- [Multi-Tier Storage Architecture](#multi-tier-storage-architecture)
+- [Hardware Acceleration & I/O Specifications](#hardware-acceleration--io-specifications)
+- [Security, Sandboxing & Data Integrity](#security-sandboxing--data-integrity)
 - [Universal Application Support (500+ Formats)](#universal-application-support-500-formats)
+- [CI/CD & Headless Pipeline Integration](#cicd--headless-pipeline-integration)
 - [Installation & Quick Start](#installation--quick-start)
 - [Complete CLI Command Reference & Syntax](#complete-cli-command-reference--syntax)
-- [Running the Test Suite](#running-the-test-suite)
+- [Test Suite & Empirical Verification](#test-suite--empirical-verification)
 - [License](#license)
 
 ---
 
-## Overview
+## Executive Summary
 
-Traditional version control systems like Git were architected for flat ASCII text files and line-by-line software diffs. When applied to modern engineering assets—such as **Hardware/EDA RTL**, **Parametric 3D CAD assemblies**, **SQLite databases**, **Audio DAWs**, **Video VFX timelines**, or **multi-gigabyte binary models**—traditional tools collapse into opaque binary blobs, line-collision merge conflicts, and repository bloat.
+Modern engineering teams manage heterogeneous artifacts that exceed the architectural boundaries of traditional version control. Monolithic CAD assemblies, multi-layer VFX compositions, hardware HDL pinouts, and columnar datasets either corrupt merge workflows, trigger out-of-memory crashes, or force organizations to deploy brittle external pointer workarounds (e.g., Git LFS).
 
-**VCX (Version Control for Everything)** solves this fundamental limitation. Built from first principles in native Python with dynamic C hardware acceleration, VCX pairs a full-featured Git-independent Merkle DAG engine with domain-specific AST analyzers, in-memory container recursion, and an autonomous **Semantic Differ Agent**.
+**VCX (Version Control for Everything)** is an enterprise-grade, 100% standalone version control platform designed for unified asset lifecycles. VCX combines a cryptographic Merkle Directed Acyclic Graph (DAG) with zero-copy kernel streaming, hardware-accelerated SIMD Content-Defined Chunking (CDC), in-memory container recursion, and an autonomous Semantic Differ Agent.
 
 ---
 
-## Key Features & Architectural Advantages
+## Enterprise Capabilities & Comparative Matrix
 
-| Capability | Traditional VCS (Git / SVN) | Git-LFS | Perforce / Plastic SCM | **VCX Superpower** |
+| Capability | Legacy VCS (Git / SVN) | Git-LFS Workarounds | Enterprise Perforce / Plastic | **VCX Industrial Standard** |
 | :--- | :--- | :--- | :--- | :--- |
-| **Binary Diff Visibility** | Opaque *"Binary files differ"* | Offloaded; zero diff insight | File locking; binary diffs rare | **Content-Defined Chunking (CDC)** with SIMD boundary cuts, mutation percentage, and string deltas. |
-| **Large File Memory** | High heap memory usage | External server pointer files | Server-side locking | **Kernel `mmap` streaming**: flat $O(1)$ RAM ($\approx 64\text{ KB}$) on multi-gigabyte models. |
-| **Remote Interruption** | Restart push from byte 0 | Fragile upload hooks | Monolithic chunk retry | **Resumable HTTP Range Protocol**: automatic status recovery and byte-offset resumption. |
-| **Pack Index Density** | Git Pack v2 | Plaintext pointers | Proprietary database | **Compact `VID2` binary index** with 256-slot $O(1)$ fanout table ($\approx 41\text{ bytes/object}$). |
-| **Domain Merges** | Line collisions | No merge support | Branch locking | **Multi-domain 3-way semantic merge** for Verilog pinouts, CAD dimensions, and AST declarations. |
-| **Runtime Independence** | Requires native `git` CLI | Requires `git-lfs` extension | Heavy daemon required | **100% Native**: Zero runtime Git dependencies; operates anywhere Python 3.10+ exists. |
+| **Unified Repository Model** | Text only; binaries bloat repository | Fractures storage across servers | Single monolithic repository | **Single unified Merkle CAS** for code, models, audio, and petabyte datasets. |
+| **Large Asset Memory Footprint** | Heap allocation loads entire file | Offloaded; zero local diff insight | Server-side file locking | **Kernel `mmap` streaming**: flat $O(1)$ RAM ($\approx 64\text{ KB}$) on multi-gigabyte models. |
+| **Network Resilience** | Interrupted pushes restart from byte 0 | Fragile pointer upload hooks | Monolithic file retry | **Resumable HTTP Range Protocol**: automatically reconnects and resumes from last byte offset. |
+| **Binary Diff Inspection** | Opaque *"Binary files differ"* | None (blind file replacement) | Blind file replacement | **SIMD-accelerated CDC**: identifies mutation percentages, shifted blocks, and embedded strings. |
+| **Pack Index Density** | Git Pack v2 | Plaintext pointer files | Proprietary database | **Compact `VID2` binary index** with 256-slot $O(1)$ fanout table ($\approx 41\text{ bytes/object}$). |
+| **Multi-Domain Merging** | Text line collisions | No merge support | Lock-only concurrency | **3-Way Semantic Merge** for Verilog pinouts, CAD dimensions, and AST declarations. |
+| **Infrastructure Overhead** | High | External LFS server required | Expensive server license | **Zero Runtime Dependencies**: Runs standalone on any system with Python 3.10+. |
 
 ---
 
-## Algorithmic Complexity & Performance
+## Industrial System Guarantees & Fault Tolerance
 
-| Subsystem | Operation | Time Complexity | Space Complexity (RAM) | Throughput / Benchmark |
-| :--- | :--- | :--- | :--- | :--- |
-| **Object Ingestion** | Staging / Blob Write | $O(N)$ streaming | **$O(1)$ RAM** ($\approx 64\text{ KB}$ buffer) | $\approx 500\text{ MB/s}$ (Disk bounded) |
-| **Pack Index Lookup** | Object SHA Resolution | **$O(1)$ prefix jump** + $O(\log_2(N/256))$ | $\approx 41\text{ bytes}$ per object | $\le 8$ bisect comparisons for 65k objects |
-| **Pack Compression** | Multi-Core Packing | $O(N / P)$ where $P = \text{CPU cores}$ | Flat pool per worker thread | Multi-threaded parallel zlib |
-| **CDC Binary Dissector** | Content Boundary Cuts | $O(N)$ via vectorized `memchr` | $O(1)$ scanning overhead | **$3.3+\text{ GB/s}$ SIMD scan** |
-| **Hash Verification** | SHA-256 Digest | $O(N)$ with SHA-NI silicon | $O(1)$ buffer | Hardware accelerated via OpenSSL EVP |
-| **Resumable Push** | Network Transfer | $O(N)$ chunked stream | $O(\text{chunk\_size})$ (default 512 KB) | Self-healing across disconnections |
+```
+[ Working Tree ] ──(Atomic Staging)──► [ .vcx/index.tmp ] ──(fsync + Rename)──► [ .vcx/index ]
+                                                                                       │
+┌─────────────────────── Crash Resilience & ACID Storage ──────────────────────────────┘
+│
+├── 1. Atomic Commit Protocol: References updated only after all objects write and sync to disk.
+├── 2. Index Self-Healing: Corrupted indices trigger automatic quarantine and backup (.bak) recovery.
+├── 3. Zero Silent Corruption: Every object verified with cryptographic SHA-256 upon read and write.
+└── 4. Lock-Free Pack Reading: Immutable binary packfiles support concurrent multi-threaded readers.
+```
+
+### 1. Atomic State Transitions (ACID)
+VCX enforces strict atomic transactions across all mutations:
+- **Write-Then-Rename**: Files and references are written to isolated temporary files, flushed via `fsync`, and atomically promoted using POSIX rename semantics. Interrupted operations leave existing repository states completely unaltered.
+- **Index Quarantine & Auto-Recovery**: If a power loss corrupts `.vcx/index`, VCX isolates the damaged index to `.vcx/index.corrupt.<timestamp>`, restores from the latest verified `.bak` snapshot, and alerts the operator.
+
+### 2. Cryptographic Tamper Evidence
+All assets are stored in a Content-Addressed Storage (CAS) hierarchy indexed by **SHA-256**. Reads validate bit-level integrity against the expected hash. Any tampering, bit-rot, or storage hardware failure is detected instantly.
+
+### 3. Concurrency & High Availability
+- **Lock-Free Read Operations**: Packfiles (`.pack`) and binary indices (`.idx`) are strictly immutable. Multiple background processes, CLI tools, or CI workers read from the object store concurrently without read-lock contention.
+- **Resilient Remote Transport**: The push protocol tracks remote chunk offsets. Network partitions, dropped sockets, or mobile disconnections resume seamlessly from the exact byte where transmission stalled.
 
 ---
 
-## How It Works (System Architecture)
+## Multi-Tier Storage Architecture
 
 ```
-                            +----------------------------------------+
-                            |            Working Tree Files          |
-                            |  (Python, Verilog, STEP, FreeCAD, DB)  |
-                            +-------------------+--------------------+
-                                                |
-                                                v
-                            +----------------------------------------+
-                            |     Domain Classifier & Sniffer        |
-                            |  * 500+ Extension Taxonomy             |
-                            |  * Magic Byte Signature Sniffer        |
-                            +-------------------+--------------------+
-                                                |
-                                                v
-                            +----------------------------------------+
-                            |        Domain Analyzers & CDC          |
-                            |  * Python/Verilog AST * STEP B-Rep     |
-                            |  * Universal Container * SIMD CDC      |
-                            +-------------------+--------------------+
-                                                |
-                                                v
-                            +----------------------------------------+
-                            |          Staging Index (.vcx/index)    |
-                            |     Atomic JSON with SHA integrity     |
-                            +-------------------+--------------------+
-                                                |
-                                                v
-                            +----------------------------------------+
-                            |    Hierarchical Merkle Trees (CAS)     |
-                            |       Commit -> Tree -> Subtrees       |
-                            |     SHA-256 Content-Addressed Blobs    |
-                            +-------------------+--------------------+
-                                                |
-                        +-----------------------+-----------------------+
-                        |                                               |
-                        v                                               v
-        +-------------------------------+               +-------------------------------+
-        |  Multi-Domain 3-Way Merger    |               |  Pack v2 & GC (VID2 Index)    |
-        |  * Verilog Port Synthesis     |               |  * Multi-Core Parallel Comp.  |
-        |  * CAD Parametric Dimensions  |               |  * 256-Slot O(1) Fanout Table |
-        |  * AST Function Composition   |               |  * Prunes Dangling Objects    |
-        +-------------------------------+               +-------------------------------+
-                        |                                               |
-                        +-----------------------+-----------------------+
-                                                |
-                                                v
-                            +----------------------------------------+
-                            |    Resumable Remote HTTP Transport     |
-                            |   * vcx serve (HTTP Daemon)            |
-                            |   * Resumable Byte-Range Push / Fetch  |
-                            +----------------------------------------+
+┌────────────────────────────────────────────────────────────────────────┐
+│                        Working Tree Filesystem                         │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────── Tier 1: Staging & Hot Loose CAS ─────────────────────┐
+│  - Individual zlib-compressed loose objects (.vcx/objects/xx/yyyy...)   │
+│  - Ingested via kernel memory-mapped zero-copy streaming (64 KB buffer)│
+│  - Instant random write access during active development iterations    │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                         (Background `vcx gc`)
+                                    │
+                                    ▼
+┌────────────────── Tier 2: Warm Consolidated Packs ─────────────────────┐
+│  - Multi-object binary archives (.pack) with parallel multi-core zlib  │
+│  - VID2 Binary Pack Index: 256-slot cumulative prefix fanout table     │
+│  - Ultra-compact density (~41 bytes/object) and O(1) candidate lookup  │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                        (`vcx push` / Network Sync)
+                                    │
+                                    ▼
+┌──────────────── Tier 3: Cold / Resumable Remote Store ─────────────────┐
+│  - Distributed HTTP endpoints and enterprise object storage            │
+│  - Chunked byte-range transmission with session checkpoint recovery    │
+│  - Zero redundant uploads for multi-gigabyte models and assets         │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 1. Streaming Content-Addressed Storage (`mmap`)
-Objects (`blob`, `tree`, `commit`, `tag`) are identified by cryptographic **SHA-256** digests. When storing large assets, [`ObjectStore.write_blob_stream`](file:///home/indhirajith/Documents/VCX/vcx/core/object_store.py) memory-maps the source file via the OS kernel page cache, calculating digests and streaming compressed 64 KB blocks directly to disk with constant memory consumption.
+---
 
-### 2. Hierarchical Merkle Trees
-VCX constructs recursive Git-style tree objects:
-- Subdirectories are stored as discrete `tree` objects with mode `040000`.
-- Leaf files are referenced as `blob` objects with executable or standard permissions (`100755` / `100644`).
-- **Merkle Subtree Reuse**: Unchanged subdirectories retain their tree SHA and are completely reused across commits, allowing instant commits regardless of project size.
+## Hardware Acceleration & I/O Specifications
 
-### 3. Binary Packfile v2 (`VID2`) & Garbage Collection
-To prevent loose files from exhausting filesystem inodes:
-- `PackWriter` consolidates objects into indexed `.pack` archives accompanied by compact **`VID2` binary index files**.
-- The `VID2` format features a **256-slot cumulative prefix fanout table**, cutting the search interval by a factor of 256 in $O(1)$ time before performing binary bisect lookups.
-- `vcx gc` traces reachability from branch heads and tags, writes packfiles, and unlinks unreferenced loose objects.
+For latency-critical paths, VCX binds directly to host native libraries via [`accelerator.py`](file:///home/indhirajith/Documents/VCX/vcx/core/accelerator.py), delivering native throughput with pure-Python portability:
 
-### 4. C/SIMD Hardware Accelerator
-Hotspots are accelerated via [`accelerator.py`](file:///home/indhirajith/Documents/VCX/vcx/core/accelerator.py):
-- **AVX2/SIMD Boundary Cuts**: Uses `libc.so.6` `memchr` vector assembly to scan content boundaries at **$3.3+\text{ GB/s}$**.
-- **Hardware Cryptography**: Binds to OpenSSL `libcrypto.so.3` `EVP_Digest*` routines to leverage Intel SHA-NI and ARMv8 Crypto instructions.
-- **Pure-Python Fallback**: Gracefully falls back to pure Python if system C libraries are absent.
+- **SIMD Content-Defined Chunking**: Evaluates boundary anchors using native `libc.so.6` `memchr` vector assembly, sustaining **$3.3+\text{ GB/s}$** on standard x86_64 AVX2 and ARM NEON architectures.
+- **Hardware-Assisted Cryptography**: Dispatches hashing to OpenSSL `libcrypto.so.3` (`EVP_Digest*`), utilizing dedicated silicon instructions (**Intel SHA-NI** and **ARMv8 Crypto**).
+- **Constant Working Set ($O(1)$ RAM)**: Memory-mapped streaming limits active memory consumption to **$\approx 64\text{ KB}$**, eliminating process heap exhaustion during 100+ GB file operations.
 
-### 5. Resumable Remote Transfer Protocol
-The built-in HTTP transport ([`transport.py`](file:///home/indhirajith/Documents/VCX/vcx/remote/transport.py) and [`server.py`](file:///home/indhirajith/Documents/VCX/vcx/remote/server.py)) features an enterprise-grade resumable upload protocol:
-- Negotiates an upload session via `POST /vcx-upload-session/init`.
-- Streams chunked byte ranges with `Content-Range: bytes START-END/TOTAL`.
-- If an upload drops due to network failure, the client polls `GET /vcx-upload-session/status` to determine the exact number of bytes safely stored on the server, and immediately resumes transmission without re-uploading prior bytes.
+---
 
-### 6. Multi-Domain 3-Way Semantic Merge
-Unlike line-based tools, VCX resolves conflicts using common ancestors and domain semantics:
-- **Verilog/EDA**: Computes disjoint pinout additions and merges new input/output declarations without collision.
-- **CAD/3D Parametric**: Reconciles independent dimension modifications (e.g., branch A lengthens chassis while branch B adds an edge fillet). Identical conflicting dimensions generate structured parametric conflict markers.
-- **Python / Software**: Reconciles non-overlapping functions, classes, and import declarations.
+## Security, Sandboxing & Data Integrity
 
-### 7. CAD Solid B-Rep & Mesh Tessellation Engine
-- **STEP Parser (`StepBrepParser`)**: Parses ISO-10303-21 manifold entities (`MANIFOLD_SOLID_BREP`, `ADVANCED_FACE`, `CLOSED_SHELL`, `CARTESIAN_POINT`), validating manifold topology and calculating exact 3D extents (`[dx, dy, dz]` in mm).
-- **Mesh Analyzer (`CadTessellator`)**: Evaluates STL/OBJ watertightness, vertex/face counts, and produces viewport summaries.
-
-### 8. Autonomous Semantic Differ Agent
-Inspects delta facts and AST structures to produce structured commit descriptions conforming to a strict JSON schema:
-
-```json
-{
-  "action_summary": "Imperative tense, < 50 characters",
-  "technical_delta": [
-    "Specific technical detail 1",
-    "Specific technical detail 2"
-  ],
-  "inferred_intent": "Explanation of why this change was made based on domain context.",
-  "tags": ["array", "of", "relevant", "tags"]
-}
-```
+- **Path Traversal Mitigation**: Relative paths containing parent references (`../`), drive anchors, or hidden prefix escapes are rejected before index registration, preventing workspace breakout attacks.
+- **Symlink Boundary Isolation**: Symlinks targeting files outside repository boundaries are safely identified and sandboxed.
+- **Deterministic Agent Verification**: Semantic diff outputs pass through rigid schema validators enforcing imperative summaries, fact-grounded deltas, and zero speculative hallucinations.
 
 ---
 
 ## Universal Application Support (500+ Formats)
 
-VCX provides native domain intelligence and magic byte sniffing across hundreds of formats:
+VCX provides native inspection, magic byte detection, and container recursion across all major engineering software suites:
 
 ```
 ├── 3D, CAD & BIM:       .step, .stp, .stl, .obj, .fcstd, .dxf, .dwg, .ifc, .brep, .iges
@@ -205,12 +159,38 @@ VCX provides native domain intelligence and magic byte sniffing across hundreds 
 
 ---
 
+## CI/CD & Headless Pipeline Integration
+
+VCX integrates into automated build runners, CI/CD matrices, and CAD/EDA test farms:
+
+```bash
+# 1. Headless CI Automated Semantic Verification
+vcx diff --semantic > delta.json
+python3 -c "
+import json, sys
+data = json.load(open('delta.json'))
+if any('Breaking' in d for d in data.get('technical_delta', [])):
+    sys.exit('Pipeline halted: Breaking architectural change detected')
+"
+
+# 2. Automated Checkpoint Runner for Testing Farms
+vcx watch --auto-commit --debounce 2.0 &
+RUNNER_PID=$!
+run_hardware_synthesis_suite.sh
+kill $RUNNER_PID
+
+# 3. Enterprise Automated Health Check
+vcx status && vcx gc
+```
+
+---
+
 ## Installation & Quick Start
 
 ### Prerequisites
 - **Operating System**: Linux / macOS / Windows
 - **Python**: 3.10 or higher
-- **Optional**: Standard C runtime (`libc.so.6`, `libcrypto.so.3`) for hardware acceleration (automatically detected).
+- **Native Acceleration**: Automatically binds to host `libc` and `libcrypto` (zero configuration required).
 
 ### 1. Installation
 ```bash
@@ -416,9 +396,9 @@ vcx agent --input delta_facts.json
 
 ---
 
-## Running the Test Suite
+## Test Suite & Empirical Verification
 
-VCX includes an exhaustive unit and integration test suite covering streaming CAS, hierarchical Merkle trees, VID2 binary fanout indexing, 3-way semantic merging, STEP B-Rep parsing, C hardware acceleration, and resumable network transport:
+VCX includes an exhaustive test suite covering streaming CAS, Merkle tree reuse, `VID2` fanout lookups, 3-way semantic merging, STEP B-Rep parsing, C hardware acceleration, and resumable network transport:
 
 ```bash
 python3 -m unittest discover tests -v
