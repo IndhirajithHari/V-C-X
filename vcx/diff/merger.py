@@ -290,11 +290,32 @@ class SemanticMerger:
         self, base: bytes, ours: bytes, theirs: bytes, file_name: str
     ) -> Tuple[bool, bytes, List[str], Optional[MergeConflict]]:
         # FreeCAD XML / Document.xml parametric merge
-        if file_name.endswith((".fcstd", ".xml", ".fcproj")):
+        if file_name.lower().endswith((".fcstd", ".xml", ".fcproj")):
             try:
-                base_root = ET.fromstring(base.decode("utf-8", errors="ignore")) if base.strip() else None
-                ours_root = ET.fromstring(ours.decode("utf-8", errors="ignore"))
-                theirs_root = ET.fromstring(theirs.decode("utf-8", errors="ignore"))
+                # Detect binary PKZIP archive
+                is_zip = (
+                    ours.startswith(b"PK\x03\x04")
+                    or theirs.startswith(b"PK\x03\x04")
+                    or (bool(base) and base.startswith(b"PK\x03\x04"))
+                )
+
+                def _extract_doc_xml(data: bytes) -> bytes:
+                    if data and data.startswith(b"PK\x03\x04"):
+                        try:
+                            with zipfile.ZipFile(io.BytesIO(data), "r") as zf:
+                                if "Document.xml" in zf.namelist():
+                                    return zf.read("Document.xml")
+                        except Exception:
+                            pass
+                    return data
+
+                base_doc = _extract_doc_xml(base)
+                ours_doc = _extract_doc_xml(ours)
+                theirs_doc = _extract_doc_xml(theirs)
+
+                base_root = ET.fromstring(base_doc.decode("utf-8", errors="ignore")) if base_doc.strip() else None
+                ours_root = ET.fromstring(ours_doc.decode("utf-8", errors="ignore"))
+                theirs_root = ET.fromstring(theirs_doc.decode("utf-8", errors="ignore"))
 
                 # Property maps: (obj_name, prop_name) -> (property_element, value_str)
                 def get_props(root):
@@ -354,7 +375,28 @@ class SemanticMerger:
                         explanations.append(f"Merged parametric update: {k[0]}.{k[1]} = {val}")
 
                 merged_xml = ET.tostring(ours_root, encoding="utf-8")
-                return True, merged_xml, explanations or ["Merged independent CAD parametric parameters"], None
+
+                if is_zip:
+                    # Repackage into a valid ZIP archive preserving member files
+                    out_buf = io.BytesIO()
+                    with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as z_out:
+                        z_out.writestr("Document.xml", merged_xml)
+                        copied = set()
+                        if ours.startswith(b"PK\x03\x04"):
+                            with zipfile.ZipFile(io.BytesIO(ours), "r") as z_ours:
+                                for item in z_ours.infolist():
+                                    if item.filename != "Document.xml":
+                                        z_out.writestr(item.filename, z_ours.read(item.filename))
+                                        copied.add(item.filename)
+                        if theirs.startswith(b"PK\x03\x04"):
+                            with zipfile.ZipFile(io.BytesIO(theirs), "r") as z_theirs:
+                                for item in z_theirs.infolist():
+                                    if item.filename != "Document.xml" and item.filename not in copied:
+                                        z_out.writestr(item.filename, z_theirs.read(item.filename))
+                                        copied.add(item.filename)
+                    return True, out_buf.getvalue(), explanations or ["Merged independent CAD parametric parameters"], None
+                else:
+                    return True, merged_xml, explanations or ["Merged independent CAD parametric parameters"], None
             except Exception:
                 pass
 
@@ -457,29 +499,73 @@ class SemanticMerger:
         o_lines = ours_text.splitlines(keepends=True)
         t_lines = theirs_text.splitlines(keepends=True)
 
-        matcher_o = difflib.SequenceMatcher(None, b_lines, o_lines)
-        matcher_t = difflib.SequenceMatcher(None, b_lines, t_lines)
-
         # If one side didn't change, return the other side
         if o_lines == b_lines:
             return theirs_text, None
         if t_lines == b_lines:
             return ours_text, None
-
-        # Check for simple append/prepend non-interference
-        diff_o = [l for l in difflib.unified_diff(b_lines, o_lines)]
-        diff_t = [l for l in difflib.unified_diff(b_lines, t_lines)]
+        if o_lines == t_lines:
+            return ours_text, None
 
         # If both just appended lines to the end
-        if ours_text.startswith(base_text) and theirs_text.startswith(base_text):
-            o_app = ours_text[len(base_text) :]
-            t_app = theirs_text[len(base_text) :]
+        if base_text and ours_text.startswith(base_text) and theirs_text.startswith(base_text):
+            o_app = ours_text[len(base_text):]
+            t_app = theirs_text[len(base_text):]
+            if o_app == t_app:
+                return ours_text, None
             return base_text + o_app + ("\n" if not o_app.endswith("\n") else "") + t_app, None
 
-        # Otherwise indicate conflict
-        conflict = MergeConflict(
-            path=file_name,
-            domain="source-code",
-            description=f"Overlapping line changes in {file_name}",
-        )
-        return ours_text, conflict
+        sm_o = difflib.SequenceMatcher(None, b_lines, o_lines)
+        sm_t = difflib.SequenceMatcher(None, b_lines, t_lines)
+
+        chunks_o = [(i1, i2, o_lines[j1:j2]) for tag, i1, i2, j1, j2 in sm_o.get_opcodes() if tag != "equal"]
+        chunks_t = [(i1, i2, t_lines[j1:j2]) for tag, i1, i2, j1, j2 in sm_t.get_opcodes() if tag != "equal"]
+
+        # Conflict check: overlapping base line slices with differing replacement content
+        for o_i1, o_i2, o_data in chunks_o:
+            for t_i1, t_i2, t_data in chunks_t:
+                overlap = False
+                if o_i1 == o_i2 and t_i1 == t_i2:
+                    if o_i1 == t_i1:
+                        overlap = True
+                elif (
+                    max(o_i1, t_i1) < min(o_i2, t_i2)
+                    or (o_i1 == o_i2 and t_i1 <= o_i1 < t_i2)
+                    or (t_i1 == t_i2 and o_i1 <= t_i1 < o_i2)
+                ):
+                    overlap = True
+                if overlap:
+                    if o_data != t_data:
+                        conflict = MergeConflict(
+                            path=file_name,
+                            domain="source-code",
+                            description=f"Overlapping line changes in {file_name}",
+                        )
+                        return ours_text, conflict
+
+        # Combine disjoint changes
+        combined_changes = []
+        added_t = set()
+        for o_i1, o_i2, o_data in chunks_o:
+            for idx, (t_i1, t_i2, t_data) in enumerate(chunks_t):
+                if o_i1 == t_i1 and o_i2 == t_i2 and o_data == t_data:
+                    added_t.add(idx)
+            combined_changes.append((o_i1, o_i2, o_data))
+
+        for idx, (t_i1, t_i2, t_data) in enumerate(chunks_t):
+            if idx not in added_t:
+                combined_changes.append((t_i1, t_i2, t_data))
+
+        combined_changes.sort(key=lambda x: (x[0], x[1]))
+
+        out = []
+        curr = 0
+        for i1, i2, data in combined_changes:
+            if i1 > curr:
+                out.extend(b_lines[curr:i1])
+            out.extend(data)
+            curr = max(curr, i2)
+        if curr < len(b_lines):
+            out.extend(b_lines[curr:])
+
+        return "".join(out), None

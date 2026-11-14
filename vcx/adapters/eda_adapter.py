@@ -211,6 +211,7 @@ class EDAAdapter:
                         port_changes.append({
                             "module": m_name,
                             "type": "added",
+                            "name": p_name,
                             "port": p_name,
                             "direction": c_port.direction,
                             "width": c_port.width,
@@ -224,6 +225,7 @@ class EDAAdapter:
                             port_changes.append({
                                 "module": m_name,
                                 "type": "modified",
+                                "name": p_name,
                                 "port": p_name,
                                 "old": f"{b_port.direction} {b_port.width}".strip(),
                                 "new": f"{c_port.direction} {c_port.width}".strip(),
@@ -235,6 +237,7 @@ class EDAAdapter:
                         port_changes.append({
                             "module": m_name,
                             "type": "removed",
+                            "name": p_name,
                             "port": p_name,
                         })
 

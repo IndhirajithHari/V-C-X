@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import shutil
 import tempfile
+import threading
 from typing import Any, Dict, List, Optional, Tuple, Union
 import zlib
 
@@ -41,12 +42,33 @@ class ObjectStorage:
         self.objects_dir.mkdir(parents=True, exist_ok=True)
         self.compression_level = compression_level
 
-        if _HAS_ZSTD and zstd is not None:
-            self._cctx = zstd.ZstdCompressor(level=self.compression_level)
-            self._dctx = zstd.ZstdDecompressor()
-        else:
-            self._cctx = None
-            self._dctx = None
+        self._local = threading.local()
+
+    def _get_cctx(self):
+        if not _HAS_ZSTD or zstd is None:
+            return None
+        cctx = getattr(self._local, "cctx", None)
+        if cctx is None:
+            cctx = zstd.ZstdCompressor(level=self.compression_level)
+            self._local.cctx = cctx
+        return cctx
+
+    def _get_dctx(self):
+        if not _HAS_ZSTD or zstd is None:
+            return None
+        dctx = getattr(self._local, "dctx", None)
+        if dctx is None:
+            dctx = zstd.ZstdDecompressor()
+            self._local.dctx = dctx
+        return dctx
+
+    @property
+    def _cctx(self):
+        return self._get_cctx()
+
+    @property
+    def _dctx(self):
+        return self._get_dctx()
 
     def _get_object_path(self, sha: str) -> Path:
         """Get path for object SHA using 2-character fan-out directory."""
@@ -63,9 +85,10 @@ class ObjectStorage:
 
     def compress(self, data: bytes) -> bytes:
         """Compress data using Zstandard or fallback zlib."""
-        if _HAS_ZSTD and self._cctx is not None:
+        cctx = self._get_cctx()
+        if cctx is not None:
             try:
-                return self._cctx.compress(data)
+                return cctx.compress(data)
             except Exception:
                 pass
         return zlib.compress(data, level=6)
@@ -75,10 +98,11 @@ class ObjectStorage:
         if not compressed:
             return b""
 
+        dctx = self._get_dctx()
         # Check for Zstandard magic header
-        if compressed.startswith(ZSTD_MAGIC) and _HAS_ZSTD and self._dctx is not None:
+        if compressed.startswith(ZSTD_MAGIC) and dctx is not None:
             try:
-                return self._dctx.decompress(compressed)
+                return dctx.decompress(compressed)
             except Exception as e:
                 # In case of partial or corrupted zstd
                 raise ValueError(f"Failed to decompress Zstandard payload: {e}") from e
@@ -88,9 +112,9 @@ class ObjectStorage:
             return zlib.decompress(compressed)
         except zlib.error as err:
             # If zlib fails, retry with zstd if not tried yet
-            if _HAS_ZSTD and self._dctx is not None:
+            if dctx is not None:
                 try:
-                    return self._dctx.decompress(compressed)
+                    return dctx.decompress(compressed)
                 except Exception:
                     pass
             raise ValueError(f"Failed to decompress payload (neither zstd nor zlib): {err}") from err

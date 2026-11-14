@@ -6,6 +6,7 @@ high-performance distributed version control engine for files of any size and do
 """
 
 from __future__ import annotations
+import concurrent.futures
 import hashlib
 import io
 import json
@@ -78,6 +79,15 @@ class VCXEngine:
     # --- REF MANAGEMENT ---
 
     @property
+    def is_detached(self) -> bool:
+        """Return True if repository is in a detached HEAD state."""
+        head_file = self.vcx_dir / "HEAD"
+        if not head_file.exists():
+            return False
+        content = head_file.read_text(encoding="utf-8").strip()
+        return bool(content and not content.startswith("ref:"))
+
+    @property
     def head_ref(self) -> Optional[str]:
         """Read active branch reference from HEAD."""
         head_file = self.vcx_dir / "HEAD"
@@ -114,9 +124,10 @@ class VCXEngine:
         else:
             (self.vcx_dir / "HEAD").write_text(f"{commit_sha}\n", encoding="utf-8")
 
-    # --- STAGING (ADD / RESET) VIA CDC & ZSTD ---
+    # --- STAGING (ADD / RESET / REMOVE) VIA CDC & ZSTD ---
 
     def _sanitize_path(self, path: Union[str, Path]) -> str:
+        """Strictly sanitize relative path, disallowing directory traversal or repository escape."""
         raw = str(path).strip().replace("\\", "/")
         if os.path.isabs(raw):
             try:
@@ -125,7 +136,7 @@ class VCXEngine:
             except ValueError:
                 raise ValueError(f"Path outside repository: {path}")
         norm = os.path.normpath(raw).replace("\\", "/")
-        if norm.startswith(".."):
+        if norm.startswith("..") or norm == ".." or norm.startswith("/"):
             raise ValueError(f"Path traversal detected: {path}")
         return norm if norm != "." else ""
 
@@ -160,10 +171,12 @@ class VCXEngine:
                 continue
             mtime = stat.st_mtime
             size = stat.st_size
+            is_exec = bool(stat.st_mode & 0o111)
+            file_mode = 0o755 if is_exec else 0o644
 
-            # Fast check: skip re-chunking if mtime and size in index.db match AND manifest + chunks exist
-            if self.index.is_file_unchanged(rel_path, mtime, size):
-                cached_row = self.index.get(rel_path)
+            # Fast check: skip re-chunking if mtime, size, and mode match AND manifest + chunks exist
+            cached_row = self.index.get(rel_path)
+            if self.index.is_row_unchanged(cached_row, mtime, size, file_mode):
                 if cached_row and self.storage.has_object(cached_row.manifest_hash):
                     try:
                         cached_manifest = self.storage.read_manifest(cached_row.manifest_hash)
@@ -176,39 +189,111 @@ class VCXEngine:
                         pass
                 # Cached manifest or chunk is missing/corrupted; fall through to re-chunk and repair
 
-            files_to_chunk.append((f_path, rel_path, mtime, size))
+            files_to_chunk.append((f_path, rel_path, mtime, size, file_mode))
 
         if not files_to_chunk:
             return staged
 
-        # Parallel batch chunking via ThreadPoolExecutor across multi-core systems
-        if len(files_to_chunk) == 1:
-            chunk_results = [self.chunker.chunk_file(files_to_chunk[0][0])]
-        else:
-            chunk_results = self.chunker.batch_chunk_files([item[0] for item in files_to_chunk])
+        # Stream files directly into ObjectStorage without whole-file RAM accumulation
+        def _stage_file_stream(
+            f_path: Path, rel_path: str, mtime: float, size: int, mode: int
+        ) -> Tuple[str, float, int, str, int]:
+            gen = self.chunker.chunk_file_stream(f_path)
+            try:
+                while True:
+                    c_info, c_bytes = next(gen)
+                    if not self.storage.has_object(c_info.hash):
+                        self.storage.write_chunk(c_bytes)
+            except StopIteration as e:
+                manifest = e.value
 
-        for (f_path, rel_path, mtime, size), (manifest, chunks) in zip(files_to_chunk, chunk_results):
             manifest.path = rel_path
-
-            # Store only new chunks into .vcx/objects/ (compressed with zstd)
-            for c_info, c_bytes in chunks:
-                if not self.storage.has_object(c_info.hash):
-                    self.storage.write_chunk(c_bytes)
-
-            # Store manifest DAG object
             manifest_sha = self.storage.write_manifest(manifest)
+            return rel_path, mtime, size, manifest_sha, mode
 
-            # Update SQLite index.db
+        staged_results = []
+        if len(files_to_chunk) == 1:
+            staged_results.append(_stage_file_stream(*files_to_chunk[0]))
+        else:
+            workers = min(len(files_to_chunk), min(32, (os.cpu_count() or 4) + 4))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = [executor.submit(_stage_file_stream, *item) for item in files_to_chunk]
+                for f in futures:
+                    staged_results.append(f.result())
+
+        for rel_path, mtime, size, manifest_sha, mode in staged_results:
             self.index.add(
                 path=rel_path,
                 mtime=mtime,
                 size=size,
                 manifest_hash=manifest_sha,
                 status="staged",
+                mode=mode,
             )
             staged.append(rel_path)
 
         return staged
+
+    def remove(self, paths: Sequence[Union[str, Path]]) -> List[str]:
+        """Stage files for deletion from working tree and repository."""
+        removed: List[str] = []
+        if not paths:
+            return removed
+
+        head_commit_sha = self.head_commit_sha
+        head_tree: Dict[str, Dict[str, Any]] = {}
+        if head_commit_sha:
+            try:
+                _, head_commit_bytes = self.storage.read_object(head_commit_sha)
+                head_commit_data = json.loads(head_commit_bytes.decode("utf-8"))
+                head_tree_sha = head_commit_data.get("tree_sha")
+                if head_tree_sha:
+                    _, t_bytes = self.storage.read_object(head_tree_sha)
+                    loaded_tree = json.loads(t_bytes.decode("utf-8"))
+                    if isinstance(loaded_tree, dict):
+                        head_tree = loaded_tree
+            except Exception:
+                pass
+
+        for p_input in paths:
+            clean_rel = self._sanitize_path(p_input)
+            full_p = self.repo_dir / clean_rel
+            exists_on_disk = full_p.exists()
+            row = self.index.get(clean_rel)
+            in_head = clean_rel in head_tree
+
+            if not exists_on_disk and not row and not in_head:
+                raise FileNotFoundError(f"Path does not exist and is not tracked: {p_input}")
+
+            if exists_on_disk:
+                if full_p.is_file():
+                    full_p.unlink()
+                elif full_p.is_dir():
+                    for root, _, files in os.walk(full_p, topdown=False):
+                        for f in files:
+                            (Path(root) / f).unlink()
+                        Path(root).rmdir()
+
+            if row:
+                self.index.update_status(clean_rel, "staged")
+            elif in_head:
+                entry = head_tree[clean_rel]
+                self.index.add(
+                    path=clean_rel,
+                    mtime=0.0,
+                    size=entry.get("size", 0),
+                    manifest_hash=entry.get("manifest_hash", ""),
+                    status="staged",
+                    mode=entry.get("mode", 0o644),
+                )
+
+            removed.append(clean_rel)
+
+        return removed
+
+    def rm(self, paths: Sequence[Union[str, Path]]) -> List[str]:
+        """Alias for remove()."""
+        return self.remove(paths)
 
     def reset(self, paths: Optional[List[Union[str, Path]]] = None) -> List[str]:
         """Unstage specified paths or all staged files."""
@@ -229,8 +314,24 @@ class VCXEngine:
     # --- FAST STATUS VIA SQLITE INDEX ---
 
     def status(self) -> Dict[str, Any]:
-        """Determine working tree state with instant SQLite mtime/size checks."""
-        active_branch = (self.head_ref or "main").replace("refs/heads/", "")
+        """Determine working tree state with instant SQLite mtime/size checks and accurate detached HEAD."""
+        head_file = self.vcx_dir / "HEAD"
+        is_detached = False
+        active_branch = "main"
+        head_sha = self.head_commit_sha
+
+        if head_file.exists():
+            content = head_file.read_text(encoding="utf-8").strip()
+            if content.startswith("ref:"):
+                ref_target = content[4:].strip()
+                active_branch = ref_target.replace("refs/heads/", "")
+                is_detached = False
+            elif content:
+                is_detached = True
+                active_branch = "detached"
+        else:
+            active_branch = "main"
+
         staged: List[Dict[str, Any]] = []
         unstaged: List[Dict[str, Any]] = []
         untracked: List[Dict[str, Any]] = []
@@ -251,8 +352,8 @@ class VCXEngine:
 
                 if rel_f in indexed_entries:
                     row = indexed_entries[rel_f]
-                    # Instant mtime & size comparison
-                    is_unchanged = self.index.is_file_unchanged(rel_f, stat.st_mtime, stat.st_size)
+                    # In-memory stat comparison to eliminate N+1 queries
+                    is_unchanged = self.index.is_row_unchanged(row, stat.st_mtime, stat.st_size)
                     if row.status == "staged":
                         staged.append({"path": rel_f, "type": "modified" if not is_unchanged else "new", "size": stat.st_size})
                     elif not is_unchanged:
@@ -270,6 +371,8 @@ class VCXEngine:
 
         return {
             "branch": active_branch,
+            "detached": is_detached,
+            "head_sha": head_sha,
             "staged": staged,
             "unstaged": unstaged,
             "untracked": untracked,
@@ -287,10 +390,9 @@ class VCXEngine:
         if not staged_rows:
             raise ValueError("No changes staged for commit (use 'vcx add' to stage files)")
 
-        # 1. Build Merkle Tree Manifest
-        tree_entries = []
+        # 1. Build Merkle Tree Manifest: inherit from head commit tree
         head_commit_sha = self.head_commit_sha
-        head_tree = {}
+        head_tree: Dict[str, Dict[str, Any]] = {}
         if head_commit_sha:
             try:
                 head_obj_type, head_commit_bytes = self.storage.read_object(head_commit_sha)
@@ -298,19 +400,39 @@ class VCXEngine:
                 head_tree_sha = head_commit_data.get("tree_sha")
                 if head_tree_sha:
                     _, t_bytes = self.storage.read_object(head_tree_sha)
-                    head_tree = json.loads(t_bytes.decode("utf-8"))
+                    loaded_tree = json.loads(t_bytes.decode("utf-8"))
+                    if isinstance(loaded_tree, dict):
+                        head_tree = loaded_tree
             except Exception:
                 pass
 
-        # 2. Extract semantic diffs for each staged file
+        # Inherit historical files from previous commit Merkle tree
+        tree_map: Dict[str, Dict[str, Any]] = dict(head_tree) if isinstance(head_tree, dict) else {}
+
+        # 2. Extract semantic diffs and overlay staged updates / prune staged deletions
         differ_inputs = []
         differ_outputs = []
         for row in staged_rows:
-            tree_entries.append({
-                "path": row.path,
-                "manifest_hash": row.manifest_hash,
-                "size": row.size,
-            })
+            curr_path = self.repo_dir / row.path
+            is_deleted = not curr_path.exists()
+
+            if is_deleted:
+                # Prune deleted file from Merkle tree
+                tree_map.pop(row.path, None)
+            else:
+                # Overlay added / updated file into Merkle tree
+                tree_entry: Dict[str, Any] = {
+                    "path": row.path,
+                    "manifest_hash": row.manifest_hash,
+                    "size": row.size,
+                }
+                if hasattr(row, "mode") and getattr(row, "mode", None) is not None:
+                    tree_entry["mode"] = row.mode
+                elif row.path in head_tree and "mode" in head_tree[row.path]:
+                    tree_entry["mode"] = head_tree[row.path]["mode"]
+                else:
+                    tree_entry["mode"] = 0o644
+                tree_map[row.path] = tree_entry
 
             # Fetch base file bytes from previous commit if available
             base_bytes = None
@@ -320,7 +442,6 @@ class VCXEngine:
                 if old_m_hash and self.storage.has_object(old_m_hash):
                     try:
                         base_manifest = self.storage.read_manifest(old_m_hash)
-                        # Reconstruct base file in memory
                         buf = io.BytesIO()
                         for c in base_manifest.chunks:
                             buf.write(self.storage.read_chunk(c.hash))
@@ -328,15 +449,16 @@ class VCXEngine:
                     except Exception:
                         pass
 
-            # Read current file bytes
-            curr_path = self.repo_dir / row.path
-            current_bytes = curr_path.read_bytes() if curr_path.exists() else b""
-            try:
-                curr_manifest = self.storage.read_manifest(row.manifest_hash)
-            except Exception as e:
-                raise ValueError(
-                    f"Staged file '{row.path}' manifest '{row.manifest_hash}' is missing or corrupted: {e}"
-                ) from e
+            # Read current file bytes and manifest
+            current_bytes = curr_path.read_bytes() if not is_deleted else b""
+            curr_manifest = None
+            if not is_deleted:
+                try:
+                    curr_manifest = self.storage.read_manifest(row.manifest_hash)
+                except Exception as e:
+                    raise ValueError(
+                        f"Staged file '{row.path}' manifest '{row.manifest_hash}' is missing or corrupted: {e}"
+                    ) from e
 
             diff_input = self.semantic.extract(
                 file_name=row.path,
@@ -358,7 +480,6 @@ class VCXEngine:
                 differ_outputs.append(d_out)
 
         # Build tree object and write to storage
-        tree_map = {e["path"]: e for e in tree_entries}
         tree_bytes = json.dumps(tree_map, indent=2, sort_keys=True).encode("utf-8")
         tree_sha = self.storage.write_object("tree", tree_bytes)
 
@@ -405,33 +526,42 @@ class VCXEngine:
         # Update HEAD
         self.update_head(commit_sha)
 
-        # Mark staged files as committed in SQLite index.db
+        # Post-commit index cleanup:
         for row in staged_rows:
-            self.index.update_status(row.path, "committed")
+            curr_path = self.repo_dir / row.path
+            if not curr_path.exists():
+                self.index.remove(row.path)
+            else:
+                self.index.update_status(row.path, "committed")
 
         return commit_sha, commit_payload
 
     # --- CHECKOUT STREAMING RECONSTRUCTION ---
 
-    def checkout(self, target_ref: str) -> int:
+    def checkout(self, target_ref: Union[str, Tuple[str, Any]]) -> int:
         """Checkout a branch or commit, reconstructing all files streamingly."""
+        if isinstance(target_ref, (tuple, list)):
+            target_ref = str(target_ref[0])
+
+        target_ref_str = str(target_ref).strip()
+
         # Resolve ref to commit SHA
         target_commit_sha = None
         new_head_content = None
-        branch_file = self.vcx_dir / "refs" / "heads" / target_ref
-        tag_file = self.vcx_dir / "refs" / "tags" / target_ref
+        branch_file = self.vcx_dir / "refs" / "heads" / target_ref_str
+        tag_file = self.vcx_dir / "refs" / "tags" / target_ref_str
         if branch_file.exists():
             target_commit_sha = branch_file.read_text(encoding="utf-8").strip()
-            new_head_content = f"ref: refs/heads/{target_ref}\n"
+            new_head_content = f"ref: refs/heads/{target_ref_str}\n"
         elif tag_file.exists():
             target_commit_sha = tag_file.read_text(encoding="utf-8").strip()
             new_head_content = f"{target_commit_sha}\n"
         else:
-            target_commit_sha = target_ref
+            target_commit_sha = target_ref_str
             new_head_content = f"{target_commit_sha}\n"
 
         if not target_commit_sha or not self.storage.has_object(target_commit_sha):
-            raise ValueError(f"Commit/ref '{target_ref}' not found in storage")
+            raise ValueError(f"Commit/ref '{target_ref_str}' not found in storage")
 
         try:
             _, c_bytes = self.storage.read_object(target_commit_sha)
@@ -452,35 +582,140 @@ class VCXEngine:
         if not isinstance(tree_map, dict):
             raise ValueError(f"Invalid tree payload in tree object '{tree_sha}'")
 
-        reconstructed_count = 0
-        for rel_path, entry in tree_map.items():
+        # Defense-in-depth: Validate every path before modifying disk
+        sanitized_entries: List[Tuple[str, Path, str, Dict[str, Any]]] = []
+        for raw_path, entry in tree_map.items():
+            if not isinstance(entry, dict):
+                raise ValueError(f"Invalid tree entry format for '{raw_path}'")
+            clean_rel = self._sanitize_path(raw_path)
+            if not clean_rel:
+                raise ValueError(f"Invalid empty path in tree: '{raw_path}'")
+            out_p = self.repo_dir / clean_rel
+            try:
+                out_p.resolve().relative_to(self.repo_dir)
+            except ValueError:
+                raise ValueError(f"Path traversal detected: {raw_path}")
+            if out_p.resolve() == self.repo_dir:
+                raise ValueError(f"Tree path resolves to repository root: '{raw_path}'")
+
             m_hash = entry.get("manifest_hash")
             if not m_hash:
-                raise ValueError(f"Invalid tree entry for '{rel_path}': missing manifest_hash")
+                raise ValueError(f"Invalid tree entry for '{raw_path}': missing manifest_hash")
             if not self.storage.has_object(m_hash):
-                raise FileNotFoundError(f"Missing manifest object '{m_hash}' for file '{rel_path}'")
+                raise FileNotFoundError(f"Missing manifest object '{m_hash}' for file '{clean_rel}'")
 
-            out_p = self.repo_dir / rel_path
+            sanitized_entries.append((clean_rel, out_p, m_hash, entry))
+
+        reconstructed_count = 0
+        target_paths: Set[str] = set()
+        for clean_rel, out_p, m_hash, entry in sanitized_entries:
+            target_paths.add(clean_rel)
             try:
                 self.storage.checkout_file(m_hash, out_p)
             except Exception as e:
-                raise RuntimeError(f"Failed to reconstruct '{rel_path}' from manifest '{m_hash}': {e}") from e
+                raise RuntimeError(f"Failed to reconstruct '{clean_rel}' from manifest '{m_hash}': {e}") from e
+
+            mode = entry.get("mode")
+            if mode is not None and os.name != "nt":
+                try:
+                    os.chmod(out_p, mode)
+                except OSError:
+                    pass
 
             stat = out_p.stat()
             self.index.add(
-                path=rel_path,
+                path=clean_rel,
                 mtime=stat.st_mtime,
                 size=stat.st_size,
                 manifest_hash=m_hash,
                 status="committed",
+                mode=mode if mode is not None else 0o644,
             )
             reconstructed_count += 1
+
+        # Remove previously tracked files that do not exist in target tree
+        for row in self.index.entries():
+            if row.path not in target_paths:
+                old_file = self.repo_dir / row.path
+                if old_file.is_file():
+                    try:
+                        old_file.unlink()
+                    except OSError:
+                        pass
+                self.index.remove(row.path)
 
         # Only update HEAD after checkout succeeds
         if new_head_content:
             (self.vcx_dir / "HEAD").write_text(new_head_content, encoding="utf-8")
 
         return reconstructed_count
+
+    # --- BRANCH MANAGEMENT ---
+
+    def create_branch(self, name: str, commit_sha: Optional[str] = None) -> None:
+        """Create a new branch pointing to current HEAD or specified commit SHA."""
+        clean_name = str(name).strip().replace("\\", "/")
+        if not clean_name:
+            raise ValueError("Branch name cannot be empty")
+        if clean_name.startswith("/") or clean_name.endswith("/") or ".." in clean_name:
+            raise ValueError(f"Invalid branch name: '{name}'")
+        for bad_char in ("~", "^", ":", "?", "*", "[", " ", "\t", "\n"):
+            if bad_char in clean_name:
+                raise ValueError(f"Invalid branch name: '{name}' contains illegal character '{bad_char}'")
+
+        if commit_sha:
+            target_sha = str(commit_sha).strip()
+            if not self.storage.has_object(target_sha):
+                raise ValueError(f"Commit '{target_sha}' does not exist in storage")
+        else:
+            target_sha = self.head_commit_sha
+            if not target_sha:
+                raise ValueError("Cannot create branch: repository has no commits yet")
+
+        branch_file = self.vcx_dir / "refs" / "heads" / clean_name
+        if branch_file.exists():
+            raise ValueError(f"Branch '{clean_name}' already exists")
+
+        branch_file.parent.mkdir(parents=True, exist_ok=True)
+        branch_file.write_text(f"{target_sha}\n", encoding="utf-8")
+
+    def list_branches(self) -> List[str]:
+        """List all branch names sorted alphabetically."""
+        heads_dir = self.vcx_dir / "refs" / "heads"
+        if not heads_dir.exists():
+            return []
+        branches: List[str] = []
+        for root, _, files in os.walk(heads_dir):
+            for f in files:
+                full_p = Path(root) / f
+                rel_name = str(full_p.relative_to(heads_dir)).replace("\\", "/")
+                branches.append(rel_name)
+        return sorted(branches)
+
+    def delete_branch(self, name: str, force: bool = False) -> None:
+        """Delete an existing branch."""
+        clean_name = str(name).strip().replace("\\", "/")
+        if not clean_name:
+            raise ValueError("Branch name cannot be empty")
+
+        branch_file = self.vcx_dir / "refs" / "heads" / clean_name
+        if not branch_file.exists() or not branch_file.is_file():
+            raise ValueError(f"Branch '{clean_name}' does not exist")
+
+        active_branch = self.head_ref.replace("refs/heads/", "") if self.head_ref else None
+        if clean_name == active_branch:
+            raise ValueError(f"Cannot delete active/checked-out branch '{clean_name}'")
+
+        branch_file.unlink()
+
+        parent = branch_file.parent
+        heads_dir = self.vcx_dir / "refs" / "heads"
+        while parent != heads_dir and parent.exists():
+            try:
+                parent.rmdir()
+                parent = parent.parent
+            except OSError:
+                break
 
     # --- LOG & INSPECTION ---
 

@@ -654,10 +654,23 @@ class Repository:
         ref_shas = []
         heads_dir = self.vcx_dir / "refs" / "heads"
         if heads_dir.exists():
-            for f in heads_dir.iterdir():
+            for f in heads_dir.rglob("*"):
                 if f.is_file():
                     try:
-                        ref_shas.append(f.read_text(encoding="utf-8").strip())
+                        content = f.read_text(encoding="utf-8").strip()
+                        if content:
+                            ref_shas.append(content)
+                    except Exception:
+                        pass
+
+        tags_dir = self.vcx_dir / "refs" / "tags"
+        if tags_dir.exists():
+            for f in tags_dir.rglob("*"):
+                if f.is_file():
+                    try:
+                        content = f.read_text(encoding="utf-8").strip()
+                        if content:
+                            ref_shas.append(content)
                     except Exception:
                         pass
 
@@ -694,6 +707,15 @@ class Repository:
                 except Exception:
                     pass
 
+        # Include staged loose blobs from the index so uncommitted files are not pruned
+        try:
+            for entry in self.index.entries():
+                sha = getattr(entry, "sha", None) or getattr(entry, "manifest_hash", None)
+                if sha:
+                    reachable.add(sha)
+        except Exception:
+            pass
+
         return self.store.gc(reachable)
 
     def pack(self) -> Tuple[Optional[Path], Optional[Path]]:
@@ -709,8 +731,10 @@ class Repository:
             return p, p.with_suffix(".idx")
         return None, None
 
-    def create_tag(self, name: str, target_sha: Optional[str] = None) -> str:
+    def create_tag(self, name: str, target_sha: Optional[Union[str, Tuple[str, Any]]] = None) -> str:
         """Create a tag pointing to a commit SHA (defaults to HEAD)."""
+        if isinstance(target_sha, (tuple, list)):
+            target_sha = str(target_sha[0])
         sha = target_sha or self.head_commit_sha
         if not sha:
             raise ValueError("Cannot create tag: no commits exist in repository")
