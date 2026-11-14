@@ -24,7 +24,8 @@ except ImportError:
     zstd = None
     _HAS_ZSTD = False
 
-from vcx.chunker import ChunkInfo, FileManifest
+from vcx.chunker import ChunkInfo, EMPTY_CHUNK_SHA, FileManifest
+EMPTY_SHA = EMPTY_CHUNK_SHA
 
 # Magic header bytes
 ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
@@ -55,6 +56,8 @@ class ObjectStorage:
 
     def has_object(self, sha: str) -> bool:
         """Check if an object or chunk exists in storage."""
+        if sha == EMPTY_CHUNK_SHA:
+            return True
         p = self._get_object_path(sha)
         return p.exists() and p.stat().st_size > 0
 
@@ -95,6 +98,8 @@ class ObjectStorage:
     def write_raw(self, data: bytes, expected_sha: Optional[str] = None) -> str:
         """Write raw payload compressed with zstd into 2-character fanout directory."""
         sha = expected_sha or hashlib.sha256(data).hexdigest()
+        if sha == EMPTY_CHUNK_SHA:
+            return sha
         obj_path = self._get_object_path(sha)
 
         if obj_path.exists() and obj_path.stat().st_size > 0:
@@ -106,12 +111,18 @@ class ObjectStorage:
         # Atomic write via temporary file
         tmp_name = f".tmp_{os.getpid()}_{sha[2:10]}_{os.urandom(4).hex()}"
         tmp_path = obj_path.parent / tmp_name
-        tmp_path.write_bytes(compressed)
-        tmp_path.replace(obj_path)
+        try:
+            tmp_path.write_bytes(compressed)
+            tmp_path.replace(obj_path)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
         return sha
 
     def read_raw(self, sha: str, verify_checksum: bool = True) -> bytes:
         """Read and decompress raw payload by SHA, optionally verifying checksum."""
+        if sha == EMPTY_CHUNK_SHA:
+            return b""
         obj_path = self._get_object_path(sha)
         if not obj_path.exists():
             raise FileNotFoundError(f"Object {sha} not found in storage ({obj_path})")
@@ -131,11 +142,11 @@ class ObjectStorage:
                 if null_idx != -1:
                     header = data[:null_idx].decode("utf-8", errors="ignore")
                     payload = data[null_idx + 1 :]
-                    # Check if actual sha matches full payload with header
-                    full_sha = hashlib.sha256(data).hexdigest()
-                    if full_sha != sha:
+                    # Check if actual sha matches payload without header
+                    payload_sha = hashlib.sha256(payload).hexdigest()
+                    if payload_sha != sha:
                         raise ValueError(
-                            f"Object checksum mismatch for {sha}: computed {actual_sha} (header: {header})"
+                            f"Object checksum mismatch for {sha}: computed {actual_sha} (payload: {payload_sha}, header: {header})"
                         )
                 else:
                     raise ValueError(
@@ -152,6 +163,8 @@ class ObjectStorage:
 
     def read_chunk(self, chunk_hash: str) -> bytes:
         """Read and decompress a content-defined chunk."""
+        if chunk_hash == EMPTY_CHUNK_SHA:
+            return b""
         return self.read_raw(chunk_hash, verify_checksum=True)
 
     # --- MANIFEST OPERATIONS ---
@@ -173,7 +186,10 @@ class ObjectStorage:
             json_bytes = raw[null_idx + 1 :]
         else:
             json_bytes = raw
-        return FileManifest.from_json(json_bytes.decode("utf-8"))
+        try:
+            return FileManifest.from_json(json_bytes.decode("utf-8"))
+        except Exception as e:
+            raise ValueError(f"Corrupted manifest object {manifest_sha}: {e}") from e
 
     # --- CHECKOUT STREAMING RECONSTRUCTION ---
 
@@ -187,23 +203,36 @@ class ObjectStorage:
         dest = Path(output_path)
         dest.parent.mkdir(parents=True, exist_ok=True)
 
+        # Fast path for empty file (0 bytes) or 0 chunks
+        if manifest.file_size == 0 or len(manifest.chunks) == 0:
+            dest.touch(exist_ok=True)
+            if dest.stat().st_size != 0:
+                dest.write_bytes(b"")
+            return 0
+
         total_written = 0
-        tmp_dest = dest.with_name(f".tmp_checkout_{dest.name}_{os.getpid()}")
+        tmp_dest = dest.with_name(f".tmp_checkout_{dest.name}_{os.getpid()}_{os.urandom(4).hex()}")
 
-        with open(tmp_dest, "wb") as out_f:
-            for chunk_info in manifest.chunks:
-                chunk_data = self.read_chunk(chunk_info.hash)
-                out_f.write(chunk_data)
-                total_written += len(chunk_data)
+        try:
+            with open(tmp_dest, "wb") as out_f:
+                for chunk_info in manifest.chunks:
+                    if chunk_info.size == 0 or chunk_info.hash == EMPTY_CHUNK_SHA:
+                        chunk_data = b""
+                    else:
+                        chunk_data = self.read_chunk(chunk_info.hash)
+                    out_f.write(chunk_data)
+                    total_written += len(chunk_data)
 
-        if total_written != manifest.file_size:
+            if total_written != manifest.file_size:
+                raise IOError(
+                    f"Checkout integrity mismatch for {manifest.path}: expected {manifest.file_size} bytes, reconstructed {total_written} bytes"
+                )
+
+            tmp_dest.replace(dest)
+            return total_written
+        except Exception:
             tmp_dest.unlink(missing_ok=True)
-            raise IOError(
-                f"Checkout integrity mismatch for {manifest.path}: expected {manifest.file_size} bytes, reconstructed {total_written} bytes"
-            )
-
-        tmp_dest.replace(dest)
-        return total_written
+            raise
 
     # --- GENERIC COMMIT & TREE OBJECTS ---
 
@@ -217,6 +246,8 @@ class ObjectStorage:
 
     def read_object(self, sha: str) -> Tuple[str, bytes]:
         """Read and decompress generic typed object; returns (obj_type, payload)."""
+        if sha == EMPTY_CHUNK_SHA:
+            return "blob", b""
         full_payload = self.read_raw(sha, verify_checksum=False)
         null_idx = full_payload.find(b"\0")
         if null_idx == -1:

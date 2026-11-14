@@ -74,10 +74,18 @@ class EDAAdapter:
     )
 
     @classmethod
-    def parse_verilog(cls, text: str) -> Dict[str, ModuleInfo]:
+    def parse_verilog(cls, text: Union[str, bytes]) -> Dict[str, ModuleInfo]:
         """Parse Verilog/SystemVerilog code into a dictionary of module definitions."""
+        if isinstance(text, bytes):
+            try:
+                text = text.decode("utf-8", errors="replace")
+            except Exception:
+                text = text.decode("latin-1", errors="replace")
         if not text:
             return {}
+
+        # Clean null bytes if present
+        text = text.replace("\x00", "")
 
         # Strip line comments (//) and block comments (/* */)
         cleaned = re.sub(r"//.*$", "", text, flags=re.MULTILINE)
@@ -140,13 +148,30 @@ class EDAAdapter:
     @classmethod
     def diff(
         cls,
-        base_data: Optional[bytes],
-        current_data: bytes,
+        base_data: Optional[Union[bytes, str]],
+        current_data: Union[bytes, str],
         file_name: str = "design.v",
     ) -> Dict[str, Any]:
         """Perform hardware-aware semantic diff comparing two Verilog states."""
-        base_text = base_data.decode("utf-8", errors="replace") if base_data else ""
-        curr_text = current_data.decode("utf-8", errors="replace")
+        if isinstance(base_data, str):
+            base_text = base_data
+        elif base_data is not None:
+            try:
+                base_text = base_data.decode("utf-8", errors="replace")
+            except Exception:
+                base_text = base_data.decode("latin-1", errors="replace")
+        else:
+            base_text = ""
+
+        if isinstance(current_data, str):
+            curr_text = current_data
+        elif current_data is not None:
+            try:
+                curr_text = current_data.decode("utf-8", errors="replace")
+            except Exception:
+                curr_text = current_data.decode("latin-1", errors="replace")
+        else:
+            curr_text = ""
 
         base_mods = cls.parse_verilog(base_text)
         curr_mods = cls.parse_verilog(curr_text)

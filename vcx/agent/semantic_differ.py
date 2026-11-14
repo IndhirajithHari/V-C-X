@@ -203,22 +203,63 @@ class SemanticDifferAgent:
             return DifferOutput(action, delta_points, intent, tags)
 
         # HDL Code / Verilog / SystemVerilog
+        # Check domain facts from EDAAdapter first
+        facts_dict = facts or {}
+        port_changes = facts_dict.get("port_changes", [])
+        fsm_changes = facts_dict.get("fsm_changes", [])
+        modules_added = facts_dict.get("modules_added", [])
+        modules_removed = facts_dict.get("modules_removed", [])
+
+        for m in modules_added:
+            delta_points.append(f"Declared new hardware module: {m}")
+        for m in modules_removed:
+            delta_points.append(f"Removed hardware module: {m}")
+
+        for pc in port_changes:
+            if isinstance(pc, dict):
+                p_type = pc.get("type", "modified")
+                p_name = pc.get("port", "unknown")
+                m_name = pc.get("module", mod_name)
+                if p_type == "added":
+                    dir_w = f"{pc.get('direction', '')} {pc.get('width', '')}".strip()
+                    delta_points.append(f"Module '{m_name}': Added {dir_w} port '{p_name}'".strip())
+                elif p_type == "modified":
+                    old_val = pc.get("old", "")
+                    new_val = pc.get("new", "")
+                    delta_points.append(f"Module '{m_name}': Modified port '{p_name}' ({old_val} -> {new_val})".strip())
+                elif p_type == "removed":
+                    delta_points.append(f"Module '{m_name}': Removed port '{p_name}'")
+            elif isinstance(pc, str):
+                delta_points.append(pc)
+
+        for fsm in fsm_changes:
+            delta_points.append(fsm if isinstance(fsm, str) else str(fsm))
+
+        # Textual diff heuristics
         if "always" in raw_diff or "posedge" in raw_diff:
             delta_points.append("Modified sequential always @(posedge clk) control logic")
         if "case" in raw_diff or "opcode" in raw_diff.lower():
             delta_points.append("Updated instruction decode case branch mappings")
         if "reg" in raw_diff or "wire" in raw_diff:
-            delta_points.append("Updated internal datapath register and signal declarations")
+            if not port_changes:
+                delta_points.append("Updated internal datapath register and signal declarations")
 
         if not delta_points:
             delta_points.append(f"Refactored {mod_name} module logic and port mappings")
 
+        # Dynamic Action Summary & Intent
         if is_alu and is_riscv:
             action = "Update RISC-V ALU pipeline logic"
             intent = "Improve ALU execution stage throughput and instruction decode timing."
         elif is_alu:
             action = f"Update ALU pipeline logic in {mod_name}"[:49]
             intent = "Enhance execution datapath and critical path timing margins."
+        elif port_changes:
+            action = f"Update {mod_name} port interface"[:49]
+            intent = "Align hardware description with updated register transfer specifications."
+        elif modules_added:
+            action = f"Add module {modules_added[0]}"[:49]
+            intent = "Align hardware description with updated register transfer specifications."
         else:
             action = f"Refactor {mod_name} hardware module"[:49]
             intent = "Align hardware description with updated register transfer specifications."
@@ -242,7 +283,59 @@ class SemanticDifferAgent:
         fillet_match = re.search(r"fillet.*?([0-9.]+)\s*mm", raw_diff + vision_summary, re.I)
         extrusion_match = re.search(r"(?:extrusion|pad|thickness).*?([0-9.]+)\s*mm", raw_diff + vision_summary, re.I)
 
-        if fillet_match:
+        if file_type == "cad/freecad":
+            tags.extend(["freecad", "parametric-cad"])
+            facts_dict = facts or {}
+            props = facts_dict.get("properties_modified", [])
+            added = facts_dict.get("objects_added", [])
+            removed = facts_dict.get("objects_removed", [])
+            sketches = facts_dict.get("sketch_changes", [])
+
+            for p in props:
+                delta_points.append(f"Modified {p['object']}.{p['property']}: {p['old_value']} -> {p['new_value']}")
+            for a in added:
+                name = a.get("name", "Unknown") if isinstance(a, dict) else str(a)
+                otype = a.get("type", "Feature") if isinstance(a, dict) else "Feature"
+                delta_points.append(f"Added CAD feature: {name} [{otype}]")
+            for r in removed:
+                name = r.get("name", "Unknown") if isinstance(r, dict) else str(r)
+                delta_points.append(f"Removed CAD feature: {name}")
+            for s in sketches:
+                delta_points.append(s if isinstance(s, str) else str(s))
+
+            if not delta_points:
+                if fillet_match:
+                    r = fillet_match.group(1)
+                    delta_points.append(f"Added {r}mm fillet to edge geometry")
+                    action = f"Add {r}mm fillet to chassis edge"[:49]
+                    tags.append("fillet")
+                elif extrusion_match:
+                    t = extrusion_match.group(1)
+                    delta_points.append(f"Increased base extrusion thickness by {t}mm")
+                    action = f"Increase base extrusion thickness by {t}mm"[:49]
+                    tags.append("extrusion")
+                else:
+                    objs = facts_dict.get("objects_count") or (curr_meta or {}).get("features_count", 0)
+                    if objs:
+                        delta_points.append(f"FreeCAD model: {objs} geometric features & bodies")
+                    else:
+                        delta_points.append(f"Updated FreeCAD model {file_name}")
+
+            if "action" not in locals():
+                if props:
+                    action = f"Update {props[0]['object']}.{props[0]['property']}"[:49]
+                elif added:
+                    feat_name = added[0].get("name", "feature") if isinstance(added[0], dict) else str(added[0])
+                    action = f"Add {feat_name} to {file_name}"[:49]
+                elif removed:
+                    feat_name = removed[0].get("name", "feature") if isinstance(removed[0], dict) else str(removed[0])
+                    action = f"Remove {feat_name} from {file_name}"[:49]
+                else:
+                    action = f"Update FreeCAD model {file_name}"[:49]
+
+            intent = "Update parametric 3D body tree and sketch constraints."
+            return DifferOutput(action, delta_points, intent, tags)
+        elif fillet_match:
             r = fillet_match.group(1)
             delta_points.append(f"Added {r}mm fillet to edge geometry")
             action = f"Add {r}mm fillet to chassis edge"[:49]
@@ -252,13 +345,6 @@ class SemanticDifferAgent:
             delta_points.append(f"Increased base extrusion thickness by {t}mm")
             action = f"Increase base extrusion thickness by {t}mm"[:49]
             tags.append("extrusion")
-        elif file_type == "cad/freecad":
-            tags.extend(["freecad", "parametric-cad"])
-            objs = (facts or {}).get("objects_count", 0)
-            delta_points.append(f"FreeCAD model: {objs} geometric features & bodies")
-            action = f"Update FreeCAD model {file_name}"[:49]
-            intent = "Update parametric 3D body tree and sketch constraints."
-            return DifferOutput(action, delta_points, intent, tags)
         elif file_type in ("cad/dwg", "cad/dxf"):
             tags.extend(["autocad", "vector-cad"])
             ents = (facts or {}).get("entities_count", 0)
@@ -285,7 +371,6 @@ class SemanticDifferAgent:
             delta_points.append(f"Viewport analysis: {vision_summary}")
 
         intent = "Fulfill mechanical packaging tolerances and structural load requirements."
-        return DifferOutput(action, delta_points, intent, tags)
         return DifferOutput(action, delta_points, intent, tags)
 
     def _analyze_database_change(

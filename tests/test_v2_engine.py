@@ -305,5 +305,144 @@ class TestVCXEngineV2Lifecycle(unittest.TestCase):
         self.assertTrue((Path(self.temp_dir) / "app.py").exists())
 
 
+class TestV2EngineEdgeCasesAndAudits(unittest.TestCase):
+    """Test the 5 critical edge cases audited in v2.0."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.engine = VCXEngine.init(self.temp_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_empty_file_chunking_and_checkout(self):
+        """1. Empty file (0 bytes) chunking produces valid manifest and checkout recreates 0-byte file."""
+        # Test raw chunker
+        manifest, chunks = chunk_bytes(b"", path="empty.txt")
+        self.assertEqual(manifest.file_size, 0)
+        self.assertEqual(len(chunks), 1)
+        self.assertEqual(chunks[0][0].size, 0)
+        self.assertEqual(chunks[0][1], b"")
+
+        # Test storage checkout
+        m_sha = self.engine.storage.write_manifest(manifest)
+        self.engine.storage.write_chunk(b"")
+        out_path = Path(self.temp_dir) / "empty_out.txt"
+        written = self.engine.storage.checkout_file(m_sha, out_path)
+        self.assertEqual(written, 0)
+        self.assertTrue(out_path.exists())
+        self.assertEqual(out_path.stat().st_size, 0)
+
+        # Test end-to-end engine add, commit, checkout with empty file
+        empty_file = Path(self.temp_dir) / "zero.txt"
+        empty_file.write_bytes(b"")
+        self.engine.add(["zero.txt"])
+        c_sha, _ = self.engine.commit("Add empty file")
+
+        empty_file.unlink()
+        self.assertFalse(empty_file.exists())
+        self.engine.checkout(c_sha)
+        self.assertTrue(empty_file.exists())
+        self.assertEqual(empty_file.stat().st_size, 0)
+
+    def test_missing_or_corrupt_object_handling(self):
+        """2. Handling of missing or corrupted objects during checkout or staging."""
+        # Create and commit a file
+        test_file = Path(self.temp_dir) / "data.bin"
+        test_file.write_bytes(b"Sample payload for corruption test")
+        self.engine.add(["data.bin"])
+        c_sha, _ = self.engine.commit("Add data.bin")
+
+        # Corrupt the chunk on disk
+        row = self.engine.index.get("data.bin")
+        manifest = self.engine.storage.read_manifest(row.manifest_hash)
+        chunk_hash = manifest.chunks[0].hash
+        chunk_path = self.engine.storage._get_object_path(chunk_hash)
+        self.assertTrue(chunk_path.exists())
+        # Overwrite chunk with corrupted data
+        chunk_path.write_bytes(b"bad zstd data \x00\xff")
+
+        # Checkout should detect corruption, fail safely, and clean up temporary files
+        test_file.unlink()
+        with self.assertRaises((RuntimeError, ValueError)):
+            self.engine.checkout(c_sha)
+        # Ensure no dangling tmp files
+        tmp_files = list(Path(self.temp_dir).glob(".tmp_checkout_*"))
+        self.assertEqual(len(tmp_files), 0)
+
+        # Test staging resilience: if cached manifest was deleted, add should re-chunk and repair
+        manifest_path = self.engine.storage._get_object_path(row.manifest_hash)
+        manifest_path.unlink()
+        # Recreate test_file with original content
+        test_file.write_bytes(b"Sample payload for corruption test")
+        # index has file_unchanged match, but object is missing
+        staged = self.engine.add(["data.bin"])
+        self.assertIn("data.bin", staged)
+        # Verify manifest was recreated in storage
+        new_row = self.engine.index.get("data.bin")
+        self.assertTrue(self.engine.storage.has_object(new_row.manifest_hash))
+
+    def test_sqlite_index_concurrency_and_busy_timeout(self):
+        """3. SQLite index connection timeout and busy_timeout (WAL mode) resilience."""
+        with self.engine.index._get_connection() as conn:
+            cur = conn.execute("PRAGMA busy_timeout;")
+            busy_timeout = cur.fetchone()[0]
+            self.assertEqual(busy_timeout, 30000)
+
+            cur2 = conn.execute("PRAGMA journal_mode;")
+            journal_mode = cur2.fetchone()[0].upper()
+            self.assertEqual(journal_mode, "WAL")
+
+        # Test corrupt database recovery
+        db_path = self.engine.index.db_path
+        for f in db_path.parent.glob(f"{db_path.name}*"):
+            f.unlink()
+        db_path.write_bytes(b"SQLite format 3\000" + b"\xff" * 500)
+        recovered_idx = Index(self.temp_dir)
+        # Should initialize clean DB without crashing
+        self.assertEqual(len(recovered_idx), 0)
+        # And corrupt backup was preserved
+        backups = list((self.engine.vcx_dir).glob("index.db.corrupt.*"))
+        self.assertTrue(len(backups) >= 1)
+
+    def test_freecad_encrypted_or_corrupt_xml_fallback(self):
+        """4. Safe fallback in FreeCAD adapter if a zip file is encrypted or corrupted ElementTree XML."""
+        # 1. Malformed ElementTree XML
+        corrupt_xml = b"<Document><Object name='Part'><UnclosedTag></Document>"
+        diff_corrupt = FreeCADAdapter.diff(None, corrupt_xml, "broken.fcstd")
+        self.assertTrue(diff_corrupt["has_changes"])
+        self.assertIn("Corrupted ElementTree XML", diff_corrupt.get("error", ""))
+        self.assertTrue(len(diff_corrupt["technical_bullets"]) >= 1)
+
+        # 2. Encrypted / password-protected zip file
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("Document.xml", b"<Document/>")
+        raw_zip = bytearray(buf.getvalue())
+        cd_idx = raw_zip.find(b"PK\x01\x02")
+        raw_zip[cd_idx + 8] |= 0x1  # Set general purpose bit 0 (encrypted)
+
+        diff_enc = FreeCADAdapter.diff(None, bytes(raw_zip), "secret.fcstd")
+        self.assertTrue(diff_enc["has_changes"])
+        self.assertIn("Encrypted", diff_enc.get("error", ""))
+        self.assertEqual(len(diff_enc["objects_removed"]), 0)
+
+    def test_eda_adapter_invalid_utf8_and_null_bytes(self):
+        """5. Error handling in EDA adapter if a file has invalid UTF-8 bytes or null bytes."""
+        # Verilog with invalid UTF-8 sequences and null bytes
+        invalid_bytes = b"module alu (input clk, input [7:0] a, output [7:0] y);\n\xff\xfe\x80\x81\x00\x00\nendmodule\n"
+        mods = EDAAdapter.parse_verilog(invalid_bytes)
+        self.assertIn("alu", mods)
+        self.assertIn("clk", mods["alu"].ports)
+        self.assertIn("a", mods["alu"].ports)
+
+        # Diff with invalid UTF-8
+        base_v = b"module alu (input clk, output [7:0] y);\nendmodule\n"
+        diff_res = EDAAdapter.diff(base_v, invalid_bytes, "alu.v")
+        self.assertTrue(diff_res["has_changes"])
+        added = [p["port"] for p in diff_res["port_changes"] if p.get("type") == "added"]
+        self.assertIn("a", added)
+
+
 if __name__ == "__main__":
     unittest.main()

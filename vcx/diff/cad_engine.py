@@ -20,9 +20,9 @@ class StepBrepParser:
         self._parse()
 
     def _parse(self) -> None:
-        # Extract 3D cartesian points: CARTESIAN_POINT('', (x, y, z))
+        # Extract 3D cartesian points: CARTESIAN_POINT('', (x, y, z)) or CARTESIAN_POINT(*, (x, y, z))
         pt_pattern = re.compile(
-            r"CARTESIAN_POINT\s*\(\s*'[^']*'\s*,\s*\(\s*([eE0-9\.\+\-]+)\s*,\s*([eE0-9\.\+\-]+)\s*,\s*([eE0-9\.\+\-]+)\s*\)\s*\)",
+            r"CARTESIAN_POINT\s*\(\s*(?:'[^']*'|\*|\$)\s*,\s*\(\s*([eE0-9\.\+\-]+)\s*,\s*([eE0-9\.\+\-]+)\s*,\s*([eE0-9\.\+\-]+)\s*\)\s*\)",
             re.IGNORECASE,
         )
         for m in pt_pattern.finditer(self.text):

@@ -13,8 +13,9 @@ import json
 import re
 import sqlite3
 import tempfile
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple
 import xml.etree.ElementTree as ET
+import zipfile
 
 from vcx.core.types import MergeConflict, MergeResult
 
@@ -44,9 +45,13 @@ class SemanticMerger:
             return self._merge_eda(base, ours_bytes, theirs_bytes, file_name)
 
         # 2. CAD / 3D Parametric Models
-        if file_type.startswith("cad/") or (
-            file_name.lower().endswith((".xml", ".fcstd", ".fcproj"))
-            and (b"<Document" in (ours_bytes or b"") or b"<Document" in (theirs_bytes or b""))
+        if (
+            file_type.startswith("cad/")
+            or file_name.lower().endswith((".fcstd", ".fcproj"))
+            or (
+                file_name.lower().endswith(".xml")
+                and (b"<Document" in (ours_bytes or b"") or b"<Document" in (theirs_bytes or b""))
+            )
         ):
             return self._merge_cad(base, ours_bytes, theirs_bytes, file_name)
 
@@ -109,51 +114,167 @@ class SemanticMerger:
                 pass
 
         # Verilog / SystemVerilog Semantic Port & Logic Merge
-        def extract_ports(text: str) -> List[str]:
-            m = re.search(r"module\s+[a-zA-Z0-9_]+\s*(?:#\s*\([^)]*\))?\s*\((.*?)\);", text, re.DOTALL)
-            if not m:
+        class PortDef(NamedTuple):
+            name: str
+            direction: str
+            width: str
+            raw: str = ""
+
+        def extract_ports(ports_str: str) -> List[PortDef]:
+            if not ports_str:
                 return []
             ports = []
-            for p in m.group(1).split(","):
+            last_dir = ""
+            last_width = ""
+            for p in ports_str.split(","):
                 clean = " ".join(p.split()).strip()
-                if clean:
-                    ports.append(clean)
+                if not clean:
+                    continue
+                pm = re.match(
+                    r"^(?P<dir>input\s+wire|input\s+reg|input|output\s+wire|output\s+reg|output|inout\s+wire|inout\s+reg|inout)?\s*"
+                    r"(?P<width>\[[^\]]+\])?\s*"
+                    r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)$",
+                    clean,
+                )
+                if pm:
+                    dir_raw = pm.group("dir") or last_dir
+                    norm_dir = (
+                        "input" if "input" in dir_raw
+                        else ("output" if "output" in dir_raw
+                        else ("inout" if "inout" in dir_raw else dir_raw))
+                    )
+                    width = pm.group("width") or (last_width if not pm.group("dir") else "")
+                    name = pm.group("name")
+                    if pm.group("dir"):
+                        last_dir = pm.group("dir")
+                        last_width = pm.group("width") or ""
+                    ports.append(PortDef(name=name, direction=norm_dir, width=width, raw=clean))
+                else:
+                    ports.append(PortDef(name=clean, direction="", width="", raw=clean))
             return ports
 
-        base_ports = extract_ports(base_text)
-        ours_ports = extract_ports(ours_text)
-        theirs_ports = extract_ports(theirs_text)
+        def parse_module(text: str):
+            m_mod = re.search(r"\bmodule\s+", text)
+            preamble = text[:m_mod.start()] if m_mod else ""
+            m = re.search(
+                r"\bmodule\s+([a-zA-Z0-9_]+)\s*(#\s*\([^;]*?\))?\s*\((.*?)\);(.*?)endmodule",
+                text,
+                re.DOTALL,
+            )
+            if not m:
+                return None
+            return {
+                "preamble": preamble,
+                "name": m.group(1),
+                "params": (m.group(2) or "").strip(),
+                "ports_str": m.group(3),
+                "body": m.group(4).strip(),
+            }
 
-        new_ours_ports = [p for p in ours_ports if p not in base_ports]
-        new_theirs_ports = [p for p in theirs_ports if p not in base_ports]
+        o_mod = parse_module(ours_text)
+        t_mod = parse_module(theirs_text)
+        b_mod = parse_module(base_text) if base_text.strip() else None
 
-        def get_body(text: str) -> str:
-            m = re.search(r"\((.*?)\);(.*?)endmodule", text, re.DOTALL)
-            return m.group(2).strip() if m else ""
+        if o_mod and t_mod:
+            b_ports = extract_ports(b_mod["ports_str"]) if b_mod else []
+            o_ports = extract_ports(o_mod["ports_str"])
+            t_ports = extract_ports(t_mod["ports_str"])
 
-        body_base = get_body(base_text)
-        body_ours = get_body(ours_text)
-        body_theirs = get_body(theirs_text)
+            b_map = {p.name: p for p in b_ports}
+            o_map = {p.name: p for p in o_ports}
+            t_map = {p.name: p for p in t_ports}
 
-        merged_body, body_conflict = self._line_3way_merge(body_base, body_ours, body_theirs, file_name)
+            # Port collision detection
+            for name in set(o_map.keys()) & set(t_map.keys()):
+                o_p = o_map[name]
+                t_p = t_map[name]
+                b_p = b_map.get(name)
 
-        if not body_conflict and (new_ours_ports or new_theirs_ports):
-            combined_ports = list(base_ports)
-            for p in new_ours_ports:
-                if p not in combined_ports:
-                    combined_ports.append(p)
-            for p in new_theirs_ports:
-                if p not in combined_ports:
-                    combined_ports.append(p)
+                o_changed = (b_p is None) or (o_p.direction != b_p.direction or o_p.width != b_p.width)
+                t_changed = (b_p is None) or (t_p.direction != b_p.direction or t_p.width != b_p.width)
 
-            mod_match = re.search(r"module\s+([a-zA-Z0-9_]+)", ours_text)
-            mod_name = mod_match.group(1) if mod_match else "module"
-            ports_formatted = ",\n    ".join(combined_ports)
-            merged_verilog = f"module {mod_name} (\n    {ports_formatted}\n);\n    {merged_body}\nendmodule\n"
-            explanations = [
-                f"Merged hardware ports: ours ({', '.join(new_ours_ports)}) and theirs ({', '.join(new_theirs_ports)})"
-            ]
-            return True, merged_verilog.encode("utf-8"), explanations, None
+                if o_changed and t_changed:
+                    if o_p.direction != t_p.direction or o_p.width != t_p.width:
+                        desc = f"Conflicting definitions for port '{name}': ours is '{o_p.raw}', theirs is '{t_p.raw}'"
+                        return (
+                            False,
+                            b"",
+                            [f"Port collision detected on '{name}'"],
+                            MergeConflict(path=file_name, domain="eda-port", description=desc),
+                        )
+
+            body_base = b_mod["body"] if b_mod else ""
+            body_ours = o_mod["body"]
+            body_theirs = t_mod["body"]
+            merged_body, body_conflict = self._line_3way_merge(body_base, body_ours, body_theirs, file_name)
+
+            if not body_conflict:
+                combined_raw = []
+                handled_names = set()
+
+                for p in b_ports:
+                    name = p.name
+                    if name in o_map and name in t_map:
+                        o_p = o_map[name]
+                        t_p = t_map[name]
+                        if t_p.raw != p.raw and o_p.raw == p.raw:
+                            combined_raw.append(t_p.raw)
+                        else:
+                            combined_raw.append(o_p.raw)
+                        handled_names.add(name)
+                    elif name in o_map:
+                        combined_raw.append(o_map[name].raw)
+                        handled_names.add(name)
+                    elif name in t_map:
+                        combined_raw.append(t_map[name].raw)
+                        handled_names.add(name)
+
+                new_o_names = []
+                for p in o_ports:
+                    if p.name not in handled_names:
+                        combined_raw.append(p.raw)
+                        handled_names.add(p.name)
+                        new_o_names.append(p.name)
+
+                new_t_names = []
+                for p in t_ports:
+                    if p.name not in handled_names:
+                        combined_raw.append(p.raw)
+                        handled_names.add(p.name)
+                        new_t_names.append(p.name)
+
+                # Preamble selection
+                b_pre = b_mod["preamble"] if b_mod else ""
+                o_pre = o_mod["preamble"]
+                t_pre = t_mod["preamble"]
+                chosen_pre = t_pre if (t_pre.strip() != b_pre.strip() and o_pre.strip() == b_pre.strip()) else o_pre
+                preamble = (chosen_pre.rstrip() + "\n\n") if chosen_pre.strip() else ""
+
+                # Parameter selection
+                b_param = b_mod["params"] if b_mod else ""
+                o_param = o_mod["params"]
+                t_param = t_mod["params"]
+                if t_param != b_param and o_param == b_param and t_param:
+                    param_block = t_param
+                elif o_param:
+                    param_block = o_param
+                elif t_param:
+                    param_block = t_param
+                elif b_param:
+                    param_block = b_param
+                else:
+                    param_block = ""
+
+                mod_name = o_mod["name"]
+                param_str = f" {param_block}" if param_block else ""
+                ports_formatted = ",\n    ".join(combined_raw)
+                merged_verilog = f"{preamble}module {mod_name}{param_str} (\n    {ports_formatted}\n);\n    {merged_body}\nendmodule\n"
+                o_joined = ", ".join(new_o_names)
+                t_joined = ", ".join(new_t_names)
+                explanations = [
+                    f"Merged hardware ports: ours ({o_joined}) and theirs ({t_joined})"
+                ]
+                return True, merged_verilog.encode("utf-8"), explanations, None
 
         # Standard line-level 3-way merge
         merged_lines, conflict = self._line_3way_merge(base_text, ours_text, theirs_text, file_name)

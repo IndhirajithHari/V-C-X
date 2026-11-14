@@ -181,33 +181,58 @@ class SemanticExtractor:
                 "modules_removed": eda_diff["modules_removed"],
                 "port_changes": eda_diff["port_changes"],
                 "fsm_changes": eda_diff["fsm_changes"],
+                "procedural_changes": eda_diff.get("procedural_changes", []),
             },
         )
 
     def _extract_code(
         self, file_name: str, base_bytes: Optional[bytes], current_bytes: bytes
     ) -> DifferInput:
-        base_lines = (base_bytes or b"").decode("utf-8", errors="replace").splitlines(keepends=True)
-        curr_lines = current_bytes.decode("utf-8", errors="replace").splitlines(keepends=True)
+        MAX_DIFF_LINES = 5000
+        MAX_DIFF_BYTES = 2 * 1024 * 1024  # 2MB
 
-        diff = list(
-            difflib.unified_diff(
-                base_lines,
-                curr_lines,
-                fromfile=f"a/{file_name}",
-                tofile=f"b/{file_name}",
+        base_raw = base_bytes or b""
+        # Fast scalability guard for oversized binary-like text or huge files
+        if len(base_raw) > MAX_DIFF_BYTES or len(current_bytes) > MAX_DIFF_BYTES:
+            delta_bytes = len(current_bytes) - len(base_raw)
+            raw_diff_str = (
+                f"--- a/{file_name} (large file, {len(base_raw)} bytes)\n"
+                f"+++ b/{file_name} (large file, {len(current_bytes)} bytes)\n"
+                f"[Summary: text size {len(current_bytes)} bytes, size delta: {delta_bytes:+d} bytes]"
             )
-        )
-        raw_diff_str = "".join(diff[:500])
+            base_lines = []
+            curr_lines = []
+        else:
+            base_lines = base_raw.decode("utf-8", errors="replace").splitlines(keepends=True)
+            curr_lines = current_bytes.decode("utf-8", errors="replace").splitlines(keepends=True)
+
+            if len(base_lines) > MAX_DIFF_LINES or len(curr_lines) > MAX_DIFF_LINES:
+                delta = len(curr_lines) - len(base_lines)
+                raw_diff_str = (
+                    f"--- a/{file_name} (large file, {len(base_lines)} lines)\n"
+                    f"+++ b/{file_name} (large file, {len(curr_lines)} lines)\n"
+                    f"@@ -1,{len(base_lines)} +1,{len(curr_lines)} @@\n"
+                    f"[Summary: text size {len(current_bytes)} bytes, line delta: {delta:+d} lines]"
+                )
+            else:
+                diff = list(
+                    difflib.unified_diff(
+                        base_lines,
+                        curr_lines,
+                        fromfile=f"a/{file_name}",
+                        tofile=f"b/{file_name}",
+                    )
+                )
+                raw_diff_str = "".join(diff[:500])
 
         # Simple AST token extraction for Python
         ext = Path(file_name).suffix.lower()
         facts: Dict[str, Any] = {"language": ext}
-        if ext == ".py":
+        if ext == ".py" and len(current_bytes) <= MAX_DIFF_BYTES and len(curr_lines) <= MAX_DIFF_LINES:
             import ast
             def get_funcs(code: bytes) -> Set[str]:
                 try:
-                    tree = ast.parse(code.decode("utf-8", errors="ignore"))
+                    tree = ast.parse(code.decode("utf-8", errors="replace").replace("\x00", ""))
                     return {node.name for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
                 except Exception:
                     return set()
@@ -282,17 +307,19 @@ class SemanticExtractor:
     def analyze_change(
         self,
         file_name: str,
-        base_bytes: Optional[bytes],
-        current_bytes: bytes,
+        base_bytes: Optional[bytes] = None,
+        current_bytes: bytes = b"",
         base_manifest: Optional[FileManifest] = None,
         current_manifest: Optional[FileManifest] = None,
+        diff_input: Optional[DifferInput] = None,
     ) -> DifferOutput:
         """Run extraction and invoke SemanticDifferAgent to produce strict output schema."""
-        diff_input = self.extract(
-            file_name=file_name,
-            base_bytes=base_bytes,
-            current_bytes=current_bytes,
-            base_manifest=base_manifest,
-            current_manifest=current_manifest,
-        )
+        if diff_input is None:
+            diff_input = self.extract(
+                file_name=file_name,
+                base_bytes=base_bytes,
+                current_bytes=current_bytes,
+                base_manifest=base_manifest,
+                current_manifest=current_manifest,
+            )
         return self.agent.analyze(diff_input)

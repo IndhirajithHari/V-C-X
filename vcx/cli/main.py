@@ -13,7 +13,19 @@ from vcx.agent.semantic_differ import SemanticDifferAgent
 from vcx.core.repository import Repository
 from vcx.diff.delta_engine import DeltaEngine
 from vcx.diff.detector import detect_file_type
+from vcx.engine import VCXEngine
 from vcx.watcher.watcher import WorkspaceWatcher
+
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+    _HAS_RICH = True
+except ImportError:
+    Console = None
+    _HAS_RICH = False
+
+_console = Console() if _HAS_RICH else None
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -633,6 +645,137 @@ def cmd_app(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_stats(args: argparse.Namespace) -> int:
+    try:
+        engine = VCXEngine.find()
+    except FileNotFoundError as e:
+        print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+    stats = engine.get_repository_stats()
+
+    def format_size(bytes_val: int) -> str:
+        val = float(bytes_val)
+        for unit in ["B", "KB", "MB", "GB", "TB"]:
+            if val < 1024.0 or unit == "TB":
+                return f"{val:,.1f} {unit}" if unit != "B" else f"{bytes_val:,} B"
+            val /= 1024.0
+        return f"{val:.1f} PB"
+
+    uncompressed_str = format_size(stats["uncompressed_size"])
+    compressed_str = format_size(stats["compressed_size"])
+    db_size_str = format_size(stats["database_size"])
+
+    if _console and sys.stdout.isatty():
+        table = Table(title="VCX v2.0 Repository Statistics & Analytics", title_justify="left", border_style="cyan")
+        table.add_column("Category", style="bold cyan", width=24)
+        table.add_column("Metric", style="bold white", width=28)
+        table.add_column("Value / Details", style="bold green")
+
+        table.add_row("Deduplication", "Tracked Files", f"{stats['total_files']:,}")
+        table.add_row("Deduplication", "Total CDC Chunks", f"{stats['total_chunks']:,}")
+        table.add_row("Deduplication", "Unique Chunks", f"{stats['unique_chunks']:,}")
+        table.add_row("Deduplication", "Deduplication Ratio", f"[bold yellow]{stats['deduplication_ratio']:.2f}x[/bold yellow]")
+
+        table.add_row("Storage & Compression", "Uncompressed Size", uncompressed_str)
+        table.add_row("Storage & Compression", "Zstandard Compressed Size", compressed_str)
+        table.add_row("Storage & Compression", "Compression Ratio", f"{stats['compression_ratio']:.2f}x")
+        table.add_row("Storage & Compression", "Space Savings", f"[bold yellow]{stats['space_savings_pct']:.1f}%[/bold yellow]")
+
+        health_style = "bold green" if stats["database_health"] in ("ok", "healthy") else "bold red"
+        table.add_row("Database & Health", "SQLite Index Size", db_size_str)
+        table.add_row("Database & Health", "Database Health", f"[{health_style}]{stats['database_health'].upper()}[/{health_style}]")
+
+        summary_panel = Panel.fit(
+            f"[bold]Deduplication Efficiency:[/bold] [yellow]{stats['deduplication_ratio']:.2f}x[/yellow] "
+            f"([green]{max(stats['total_chunks'] - stats['unique_chunks'], 0):,}[/green] redundant chunks eliminated)\n"
+            f"[bold]Compression Savings:[/bold]      [yellow]{stats['space_savings_pct']:.1f}%[/yellow] space saved via Zstandard\n"
+            f"[bold]Index Integrity:[/bold]          [{health_style}]{stats['database_health'].upper()}[/{health_style}] (ACID SQLite WAL Mode)",
+            title="Repository Health Summary",
+            border_style="green" if stats["database_health"] in ("ok", "healthy") else "red",
+        )
+
+        _console.print(table)
+        _console.print()
+        _console.print(summary_panel)
+    else:
+        print("=== VCX v2.0 Repository Statistics ===")
+        print(f"Tracked Files:             {stats['total_files']:,}")
+        print(f"Total CDC Chunks:          {stats['total_chunks']:,}")
+        print(f"Unique Chunks:             {stats['unique_chunks']:,}")
+        print(f"Deduplication Ratio:       {stats['deduplication_ratio']:.2f}x")
+        print(f"Uncompressed Size:         {uncompressed_str}")
+        print(f"Zstd Compressed Size:      {compressed_str}")
+        print(f"Space Savings:             {stats['space_savings_pct']:.1f}% (Ratio: {stats['compression_ratio']:.2f}x)")
+        print(f"Database Size:             {db_size_str}")
+        print(f"Database Health:           {stats['database_health'].upper()}")
+
+    return 0
+
+
+def cmd_verify(args: argparse.Namespace) -> int:
+    try:
+        engine = VCXEngine.find()
+    except FileNotFoundError as e:
+        print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+    if _console and sys.stdout.isatty():
+        _console.print("Verifying repository integrity (manifests, CDC chunk checksums, index)...", style="dim")
+    else:
+        print("Verifying repository integrity (manifests, CDC chunk checksums, index)...")
+    result = engine.verify_repository_integrity()
+
+    if result["valid"]:
+        if _console and sys.stdout.isatty():
+            _console.print(
+                Panel.fit(
+                    f"[bold green]Repository integrity verified: 100% OK[/bold green]\n"
+                    f"[dim]Files verified:[/dim]  {result['files_checked']:,}\n"
+                    f"[dim]Chunks verified:[/dim] {result['chunks_checked']:,}\n"
+                    f"[dim]Database health:[/dim] {'OK' if result['database_ok'] else 'ERROR'}",
+                    title="VCX Integrity Check (fsck)",
+                    border_style="green",
+                )
+            )
+        else:
+            print(f"Repository integrity verified: OK ({result['files_checked']} files, {result['chunks_checked']} chunks verified)")
+        return 0
+    else:
+        if _console and sys.stdout.isatty():
+            table = Table(title="Corrupted or Missing Objects Detected", border_style="red")
+            table.add_column("Type", style="bold red", width=18)
+            table.add_column("Details", style="white")
+
+            for h in result["missing_manifests"]:
+                table.add_row("Missing Manifest", h)
+            for h in result["corrupted_manifests"]:
+                table.add_row("Corrupt Manifest", h)
+            for h in result["missing_chunks"]:
+                table.add_row("Missing Chunk", h)
+            for h in result["corrupted_chunks"]:
+                table.add_row("Corrupt Chunk", h)
+            for err in result["errors"]:
+                table.add_row("Integrity Error", err)
+
+            _console.print(
+                Panel.fit(
+                    f"[bold red]Integrity check failed: corruptions detected![/bold red]\n"
+                    f"[dim]Missing chunks:[/dim]   {len(result['missing_chunks'])}\n"
+                    f"[dim]Corrupted chunks:[/dim] {len(result['corrupted_chunks'])}\n"
+                    f"[dim]Database ok:[/dim]      {result['database_ok']}",
+                    title="VCX Integrity Failure",
+                    border_style="red",
+                )
+            )
+            _console.print(table)
+        else:
+            print("ERROR: Repository integrity check failed!", file=sys.stderr)
+            for err in result["errors"]:
+                print(f"  * {err}", file=sys.stderr)
+        return 1
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="vcx",
@@ -772,6 +915,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_app.add_argument("action", choices=["inspect", "list"], help="Action: 'inspect' a file or 'list' supported software")
     p_app.add_argument("target", nargs="?", help="File path to inspect")
     p_app.set_defaults(func=cmd_app)
+
+    # stats
+    p_stats = subparsers.add_parser("stats", help="Display repository deduplication, compression, and index analytics")
+    p_stats.set_defaults(func=cmd_stats)
+
+    # verify
+    p_verify = subparsers.add_parser("verify", help="Verify integrity of manifests, chunks, and index database")
+    p_verify.set_defaults(func=cmd_verify)
+
+    # fsck
+    p_fsck = subparsers.add_parser("fsck", help="Verify repository integrity (alias for verify)")
+    p_fsck.set_defaults(func=cmd_verify)
 
     args = parser.parse_args(argv)
     return args.func(args)

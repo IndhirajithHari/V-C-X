@@ -7,7 +7,7 @@ for massive CAD models, EDA floorplans, video assets, databases, and source code
 
 from __future__ import annotations
 
-from vcx.chunker import ChunkInfo, FastCDCEngine, FileManifest, chunk_bytes, chunk_file
+from vcx.chunker import ChunkInfo, FastCDCEngine, FileManifest, batch_chunk_files, chunk_bytes, chunk_file
 from vcx.engine import VCXEngine
 from vcx.index import Index, IndexRow
 from vcx.semantic import SemanticExtractor
@@ -31,4 +31,5 @@ __all__ = [
     "EDAAdapter",
     "chunk_bytes",
     "chunk_file",
+    "batch_chunk_files",
 ]

@@ -18,10 +18,13 @@ class FreeCADAdapter:
     """Extracts parametric CAD topology and property deltas from .FCStd archives."""
 
     @staticmethod
-    def _extract_xml_contents(data: bytes) -> Tuple[Optional[str], Optional[str]]:
-        """Extract Document.xml and GuiDocument.xml from in-memory bytes or zip."""
+    def _extract_xml_contents(data: Optional[bytes]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+        """Extract Document.xml and GuiDocument.xml from in-memory bytes or zip.
+
+        Returns (doc_xml, gui_xml, error_reason).
+        """
         if not data:
-            return None, None
+            return None, None, None
 
         # Check if zip container (PK magic bytes)
         if data.startswith(b"PK\x03\x04"):
@@ -29,31 +32,54 @@ class FreeCADAdapter:
                 with zipfile.ZipFile(io.BytesIO(data)) as zf:
                     doc_xml = None
                     gui_xml = None
+
+                    # Check for encrypted entries
+                    for info in zf.infolist():
+                        if info.flag_bits & 0x1:
+                            return None, None, "Encrypted / password-protected ZIP archive"
+
                     for name in zf.namelist():
                         if name.endswith("Document.xml") and not name.endswith("GuiDocument.xml"):
-                            doc_xml = zf.read(name).decode("utf-8", errors="replace")
+                            try:
+                                doc_xml = zf.read(name).decode("utf-8", errors="replace")
+                            except (RuntimeError, zipfile.BadZipFile) as e:
+                                return None, None, f"Encrypted or corrupted ZIP entry ({name}): {e}"
                         elif name.endswith("GuiDocument.xml"):
-                            gui_xml = zf.read(name).decode("utf-8", errors="replace")
-                    return doc_xml, gui_xml
-            except Exception:
-                pass
+                            try:
+                                gui_xml = zf.read(name).decode("utf-8", errors="replace")
+                            except (RuntimeError, zipfile.BadZipFile):
+                                gui_xml = None
+
+                    if doc_xml is not None:
+                        return doc_xml, gui_xml, None
+                    return None, None, "Document.xml not found in archive"
+            except zipfile.BadZipFile as e:
+                return None, None, f"Corrupted ZIP container: {e}"
+            except Exception as e:
+                return None, None, f"ZIP extraction error: {e}"
 
         # Raw XML text fallback
-        text = data.decode("utf-8", errors="replace")
-        if "<Document" in text:
-            return text, None
-        return None, None
+        try:
+            text = data.decode("utf-8", errors="replace")
+            if "<Document" in text:
+                return text, None, None
+        except Exception as e:
+            return None, None, f"Decoding error: {e}"
+
+        return None, None, "Unrecognized FreeCAD format"
 
     @classmethod
-    def parse_document_xml(cls, xml_str: str) -> Dict[str, Any]:
+    def parse_document_xml(cls, xml_str: Optional[str]) -> Dict[str, Any]:
         """Parse FreeCAD Document.xml into a structured dictionary of objects and properties."""
         if not xml_str:
-            return {"objects": {}, "sketch_constraints": {}}
+            return {"objects": {}, "sketch_constraints": {}, "error": None}
 
         try:
             root = ET.fromstring(xml_str)
-        except Exception:
-            return {"objects": {}, "sketch_constraints": {}}
+        except ET.ParseError as e:
+            return {"objects": {}, "sketch_constraints": {}, "error": f"Corrupted ElementTree XML: {e}"}
+        except Exception as e:
+            return {"objects": {}, "sketch_constraints": {}, "error": f"XML parse error: {e}"}
 
         objects: Dict[str, Dict[str, Any]] = {}
         sketch_constraints: Dict[str, List[Dict[str, str]]] = {}
@@ -122,11 +148,49 @@ class FreeCADAdapter:
         file_name: str = "model.fcstd",
     ) -> Dict[str, Any]:
         """Perform exact parametric comparison between two FreeCAD states."""
-        base_doc_xml, _ = cls._extract_xml_contents(base_data) if base_data else (None, None)
-        curr_doc_xml, _ = cls._extract_xml_contents(current_data)
+        base_doc_xml, _, base_extract_err = cls._extract_xml_contents(base_data) if base_data else (None, None, None)
+        curr_doc_xml, _, curr_extract_err = cls._extract_xml_contents(current_data) if current_data else (None, None, None)
 
-        base_parsed = cls.parse_document_xml(base_doc_xml) if base_doc_xml else {"objects": {}, "sketch_constraints": {}}
-        curr_parsed = cls.parse_document_xml(curr_doc_xml) if curr_doc_xml else {"objects": {}, "sketch_constraints": {}}
+        base_parsed = cls.parse_document_xml(base_doc_xml) if base_doc_xml else {"objects": {}, "sketch_constraints": {}, "error": base_extract_err}
+        curr_parsed = cls.parse_document_xml(curr_doc_xml) if curr_doc_xml else {"objects": {}, "sketch_constraints": {}, "error": curr_extract_err}
+
+        base_error = base_parsed.get("error")
+        curr_error = curr_parsed.get("error")
+
+        # If current_data is non-empty and could not be extracted/parsed (corrupt/encrypted)
+        if current_data and curr_error:
+            summary = f"Corrupted or encrypted FreeCAD model in {file_name}: {curr_error}"
+            bullets = [f"Parametric XML extraction fallback: {curr_error}"]
+            return {
+                "format": "FreeCAD",
+                "file": file_name,
+                "has_changes": True,
+                "objects_added": [],
+                "objects_removed": [],
+                "properties_modified": [],
+                "sketch_changes": [],
+                "technical_bullets": bullets,
+                "summary": summary,
+                "error": curr_error,
+            }
+
+        # If base_data had an error but current_data is valid
+        if base_data and base_error:
+            curr_objs = curr_parsed.get("objects", {})
+            objects_added = [{"name": name, "type": curr_objs[name].get("type", "Unknown")} for name in sorted(curr_objs.keys())]
+            bullets = [f"Recovered valid FreeCAD model from previously unparseable state ({len(objects_added)} features)"]
+            return {
+                "format": "FreeCAD",
+                "file": file_name,
+                "has_changes": True,
+                "objects_added": objects_added,
+                "objects_removed": [],
+                "properties_modified": [],
+                "sketch_changes": [],
+                "technical_bullets": bullets,
+                "summary": f"Parametric changes in {file_name}: +{len(objects_added)} features (base model unparseable)",
+                "error": None,
+            }
 
         base_objs = base_parsed.get("objects", {})
         curr_objs = curr_parsed.get("objects", {})

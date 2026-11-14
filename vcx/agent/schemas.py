@@ -3,7 +3,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 import json
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 
 @dataclass
@@ -49,6 +49,7 @@ class DifferOutput:
 
     def validate(self) -> None:
         """Validate strict constraints."""
+        self.action_summary = str(self.action_summary or "Update file")
         if len(self.action_summary) >= 50:
             # Enforce < 50 characters constraint
             self.action_summary = self.action_summary[:46] + "..."
@@ -56,6 +57,8 @@ class DifferOutput:
             self.technical_delta = [str(self.technical_delta)]
         if not isinstance(self.tags, list):
             self.tags = [str(self.tags)]
+        if self.inferred_intent is None:
+            self.inferred_intent = ""
 
     def to_dict(self) -> Dict[str, Any]:
         self.validate()

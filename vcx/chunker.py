@@ -7,13 +7,14 @@ stores the local delta without rewriting unchanged chunks.
 """
 
 from __future__ import annotations
+import concurrent.futures
 from dataclasses import asdict, dataclass, field
 import hashlib
 import io
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Tuple, Union
+from typing import Any, Dict, Generator, List, Optional, Sequence, Tuple, Union
 
 # Try importing fastcdc; fall back to pure-Python Gear rolling hash
 try:
@@ -66,6 +67,7 @@ DEFAULT_MIN_CHUNK = 4096      # 4 KB
 DEFAULT_AVG_CHUNK = 16384     # 16 KB
 DEFAULT_MAX_CHUNK = 65536     # 64 KB
 WHOLE_FILE_THRESHOLD = 65536  # Files <= 64KB use single chunk
+EMPTY_CHUNK_SHA = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 
 @dataclass(slots=True)
@@ -143,6 +145,14 @@ class FileManifest:
         """Compute chunk modification ratio against a previous manifest."""
         current_hashes = set(self.chunk_hashes())
         if not base_manifest or not base_manifest.chunks:
+            if not self.chunks:
+                return {
+                    "total_chunks": 0,
+                    "modified_chunks": 0,
+                    "unmodified_chunks": 0,
+                    "modification_ratio": 0.0,
+                    "summary": "Empty file (0 chunks)",
+                }
             return {
                 "total_chunks": len(self.chunks),
                 "modified_chunks": len(self.chunks),
@@ -191,7 +201,13 @@ class FastCDCEngine:
         """Slice byte array into CDC chunks and return FileManifest + chunk payloads."""
         n = len(data)
 
-        # Optimization: Files <= 64KB use single chunk
+        # Empty file (0 bytes) optimization
+        if n == 0:
+            chunk_info = ChunkInfo(hash=EMPTY_CHUNK_SHA, offset=0, size=0)
+            manifest = FileManifest(path=path, file_size=0, chunks=[chunk_info])
+            return manifest, [(chunk_info, b"")]
+
+        # Optimization: Files <= WHOLE_FILE_THRESHOLD use single chunk
         if n <= WHOLE_FILE_THRESHOLD:
             chunk_hash = hashlib.sha256(data).hexdigest()
             chunk_info = ChunkInfo(hash=chunk_hash, offset=0, size=n)
@@ -273,6 +289,12 @@ class FastCDCEngine:
         file_size = p.stat().st_size
         rel_path = str(file_path)
 
+        # Empty file (0 bytes)
+        if file_size == 0:
+            c_info = ChunkInfo(hash=EMPTY_CHUNK_SHA, offset=0, size=0)
+            yield c_info, b""
+            return FileManifest(path=rel_path, file_size=0, chunks=[c_info])
+
         # Small files
         if file_size <= WHOLE_FILE_THRESHOLD:
             data = p.read_bytes()
@@ -281,57 +303,86 @@ class FastCDCEngine:
             yield c_info, data
             return FileManifest(path=rel_path, file_size=file_size, chunks=[c_info])
 
-        c_infos: List[ChunkInfo] = []
+        # 1. Try fastcdc library on binary file handle if available
+        if _HAS_FASTCDC and fastcdc is not None:
+            c_infos: List[ChunkInfo] = []
+            try:
+                with open(p, "rb") as fp:
+                    it = fastcdc.fastcdc(
+                        fp,
+                        min_size=self.min_size,
+                        avg_size=self.avg_size,
+                        max_size=self.max_size,
+                        fat=True,
+                    )
+                    for chunk in it:
+                        c_data = chunk.data if hasattr(chunk, "data") else b""
+                        c_hash = hashlib.sha256(c_data).hexdigest()
+                        c_info = ChunkInfo(hash=c_hash, offset=chunk.offset, size=len(c_data))
+                        c_infos.append(c_info)
+                        yield c_info, c_data
+                return FileManifest(path=rel_path, file_size=file_size, chunks=c_infos)
+            except Exception:
+                if c_infos:
+                    # Partial chunks were already yielded; do not re-yield via fallback
+                    raise
+                # Fall through to pure-Python Gear Hash streaming
+
+        # 2. Pure-Python Gear rolling hash streaming implementation
+        c_infos = []
         pos = 0
         buffer = bytearray()
-        buf_offset = 0
-
         table = GEAR_TABLE
         mask = self.mask_normal
         read_chunk_size = 256 * 1024  # 256 KB read buffer
 
         with open(p, "rb") as f:
-            while True:
-                chunk_read = f.read(read_chunk_size)
-                if not chunk_read and not buffer:
-                    break
-                if chunk_read:
+            eof = False
+            while not eof or buffer:
+                # Ensure buffer has at least max_size bytes unless EOF is reached
+                while len(buffer) < self.max_size and not eof:
+                    chunk_read = f.read(read_chunk_size)
+                    if not chunk_read:
+                        eof = True
+                        break
                     buffer.extend(chunk_read)
 
-                # Process buffer
-                while len(buffer) >= self.max_size or (not chunk_read and buffer):
-                    n_buf = len(buffer)
-                    if not chunk_read and n_buf <= self.max_size:
-                        # Final tail chunk
-                        c_data = bytes(buffer)
-                        c_hash = hashlib.sha256(c_data).hexdigest()
-                        c_info = ChunkInfo(hash=c_hash, offset=pos, size=len(c_data))
-                        c_infos.append(c_info)
-                        yield c_info, c_data
-                        buffer.clear()
-                        break
+                n_buf = len(buffer)
+                if n_buf == 0:
+                    break
 
-                    cut = min(self.max_size, n_buf)
-                    fingerprint = 0
-                    curr = self.min_size
-                    found_cut = False
-
-                    while curr < cut:
-                        fingerprint = ((fingerprint << 1) + table[buffer[curr]]) & 0xFFFFFFFF
-                        if (fingerprint & mask) == 0:
-                            cut = curr + 1
-                            found_cut = True
-                            break
-                        curr += 1
-
-                    # Extract chunk
-                    c_data = bytes(buffer[:cut])
+                # If at EOF and remaining buffer <= min_size, emit final tail chunk
+                if eof and n_buf <= self.min_size:
+                    c_data = bytes(buffer)
                     c_hash = hashlib.sha256(c_data).hexdigest()
                     c_info = ChunkInfo(hash=c_hash, offset=pos, size=len(c_data))
                     c_infos.append(c_info)
                     yield c_info, c_data
-                    pos += cut
-                    del buffer[:cut]
+                    buffer.clear()
+                    pos += len(c_data)
+                    break
+
+                limit = min(self.max_size, n_buf)
+                cut = limit
+                fingerprint = 0
+                curr = self.min_size
+
+                # Scan from min_size boundary up to max_size limit
+                while curr < limit:
+                    fingerprint = ((fingerprint << 1) + table[buffer[curr]]) & 0xFFFFFFFF
+                    if (fingerprint & mask) == 0:
+                        cut = curr + 1
+                        break
+                    curr += 1
+
+                # Extract and yield chunk
+                c_data = bytes(buffer[:cut])
+                c_hash = hashlib.sha256(c_data).hexdigest()
+                c_info = ChunkInfo(hash=c_hash, offset=pos, size=len(c_data))
+                c_infos.append(c_info)
+                yield c_info, c_data
+                pos += cut
+                del buffer[:cut]
 
         return FileManifest(path=rel_path, file_size=file_size, chunks=c_infos)
 
@@ -349,6 +400,29 @@ class FastCDCEngine:
             manifest = e.value
         return manifest, chunks
 
+    def batch_chunk_files(
+        self,
+        file_paths: Sequence[Union[str, Path]],
+        max_workers: Optional[int] = None,
+    ) -> List[Tuple[FileManifest, List[Tuple[ChunkInfo, bytes]]]]:
+        """Chunk multiple files concurrently using ThreadPoolExecutor.
+
+        Returns results in the exact same order as file_paths, perfectly
+        equivalent to sequential chunk_file calls.
+        """
+        paths = [Path(p) for p in file_paths]
+        if not paths:
+            return []
+
+        if len(paths) == 1:
+            return [self.chunk_file(paths[0])]
+
+        workers = max_workers or min(32, (os.cpu_count() or 4) + 4)
+        workers = min(len(paths), workers)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+            return list(executor.map(self.chunk_file, paths))
+
 
 # Module-level default singleton
 _DEFAULT_CHUNKER = FastCDCEngine()
@@ -362,3 +436,11 @@ def chunk_bytes(data: bytes, path: str = "") -> Tuple[FileManifest, List[Tuple[C
 def chunk_file(file_path: Union[str, Path]) -> Tuple[FileManifest, List[Tuple[ChunkInfo, bytes]]]:
     """Slice a file on disk into CDC chunks."""
     return _DEFAULT_CHUNKER.chunk_file(file_path)
+
+
+def batch_chunk_files(
+    file_paths: Sequence[Union[str, Path]],
+    max_workers: Optional[int] = None,
+) -> List[Tuple[FileManifest, List[Tuple[ChunkInfo, bytes]]]]:
+    """Slice multiple files into CDC chunks concurrently using ThreadPoolExecutor."""
+    return _DEFAULT_CHUNKER.batch_chunk_files(file_paths, max_workers=max_workers)
