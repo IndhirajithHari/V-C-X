@@ -7,9 +7,11 @@ for massive CAD models, EDA floorplans, video assets, databases, and source code
 
 from __future__ import annotations
 
+from vcx.bundle import create_bundle, verify_bundle
 from vcx.chunker import ChunkInfo, FastCDCEngine, FileManifest, batch_chunk_files, chunk_bytes, chunk_file
 from vcx.engine import VCXEngine
 from vcx.index import Index, IndexRow
+from vcx.reflog import ReflogEntry, read_reflog, record_reflog
 from vcx.semantic import SemanticExtractor
 from vcx.storage import ObjectStorage
 from vcx.adapters.eda_adapter import EDAAdapter
@@ -32,4 +34,9 @@ __all__ = [
     "chunk_bytes",
     "chunk_file",
     "batch_chunk_files",
+    "ReflogEntry",
+    "record_reflog",
+    "read_reflog",
+    "create_bundle",
+    "verify_bundle",
 ]

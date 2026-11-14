@@ -10,10 +10,12 @@ from typing import List, Optional
 
 from vcx.agent.schemas import DifferInput
 from vcx.agent.semantic_differ import SemanticDifferAgent
+from vcx.bundle import create_bundle, verify_bundle
 from vcx.core.repository import Repository
 from vcx.diff.delta_engine import DeltaEngine
 from vcx.diff.detector import detect_file_type
 from vcx.engine import VCXEngine
+from vcx.reflog import read_reflog
 from vcx.watcher.watcher import WorkspaceWatcher
 
 try:
@@ -300,10 +302,23 @@ def cmd_merge(args: argparse.Namespace) -> int:
         print(f"fatal: {e}", file=sys.stderr)
         return 1
 
+    if getattr(args, "abort", False):
+        if hasattr(repo, "merge_abort") and repo.merge_abort():
+            print("Merge aborted: working tree restored to HEAD.")
+            return 0
+        else:
+            print("fatal: no merge in progress to abort", file=sys.stderr)
+            return 1
+
+    branch = getattr(args, "branch", None)
+    if not branch:
+        print("fatal: branch argument required when not using --abort", file=sys.stderr)
+        return 1
+
     try:
-        result = repo.merge(args.branch)
+        result = repo.merge(branch)
         if result.success:
-            print(f"Merge successful: integrated '{args.branch}' into {repo.head_ref or 'HEAD'}")
+            print(f"Merge successful: integrated '{branch}' into {repo.head_ref or 'HEAD'}")
             if result.semantic_resolutions:
                 print("Semantic resolutions applied:")
                 for r in result.semantic_resolutions:
@@ -316,6 +331,67 @@ def cmd_merge(args: argparse.Namespace) -> int:
             return 1
     except Exception as e:
         print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_reflog(args: argparse.Namespace) -> int:
+    try:
+        try:
+            engine = VCXEngine.find()
+            vcx_dir = engine.vcx_dir
+        except FileNotFoundError:
+            repo = Repository.find()
+            vcx_dir = repo.vcx_dir
+    except FileNotFoundError as e:
+        print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+    target_ref = getattr(args, "ref", "HEAD") or "HEAD"
+    limit = getattr(args, "limit", 50) or 50
+    entries = read_reflog(vcx_dir, ref_name=target_ref, limit=limit)
+
+    if not entries:
+        print(f"No reflog entries found for '{target_ref}'.")
+        return 0
+
+    for i, entry in enumerate(entries):
+        short_new = entry.new_sha[:8] if entry.new_sha else "00000000"
+        rel_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(entry.timestamp))
+        print(f"{short_new} {target_ref}@{{{i}}}: {entry.action}: {entry.message} ({rel_time})")
+    return 0
+
+
+def cmd_bundle_create(args: argparse.Namespace) -> int:
+    try:
+        try:
+            repo_or_engine = VCXEngine.find()
+        except FileNotFoundError:
+            repo_or_engine = Repository.find()
+    except FileNotFoundError as e:
+        print(f"fatal: {e}", file=sys.stderr)
+        return 1
+
+    out_file = Path(args.file)
+    refs_filter = getattr(args, "refs", None)
+    try:
+        created = create_bundle(repo_or_engine, out_file, refs=refs_filter)
+        print(f"Created bundle '{created}' successfully.")
+        return 0
+    except Exception as e:
+        print(f"fatal: failed to create bundle: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_bundle_verify(args: argparse.Namespace) -> int:
+    bundle_file = Path(args.file)
+    valid, errors = verify_bundle(bundle_file)
+    if valid:
+        print(f"Bundle '{bundle_file}' is valid.")
+        return 0
+    else:
+        print(f"Bundle verification failed for '{bundle_file}':", file=sys.stderr)
+        for err in errors:
+            print(f"  * {err}", file=sys.stderr)
         return 1
 
 
@@ -827,8 +903,26 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # merge
     p_merge = subparsers.add_parser("merge", help="Join two development histories with semantic resolution")
-    p_merge.add_argument("branch", help="Branch name to merge into current branch")
+    p_merge.add_argument("branch", nargs="?", default=None, help="Branch name to merge into current branch")
+    p_merge.add_argument("--abort", action="store_true", help="Abort current merge in progress and reset working tree")
     p_merge.set_defaults(func=cmd_merge)
+
+    # reflog
+    p_reflog = subparsers.add_parser("reflog", help="Display reference transaction audit log")
+    p_reflog.add_argument("ref", nargs="?", default="HEAD", help="Ref name to inspect (default: HEAD)")
+    p_reflog.add_argument("-n", "--limit", type=int, default=50, help="Max entries to display")
+    p_reflog.set_defaults(func=cmd_reflog)
+
+    # bundle
+    p_bundle = subparsers.add_parser("bundle", help="Create and verify portable single-file repository bundles (.vcxpack)")
+    bundle_sub = p_bundle.add_subparsers(dest="bundle_subcommand", help="Bundle action (create/verify)")
+    p_bundle_create = bundle_sub.add_parser("create", help="Create a single-file .vcxpack bundle")
+    p_bundle_create.add_argument("file", help="Destination bundle file path")
+    p_bundle_create.add_argument("--refs", nargs="*", help="Optional ref names to include")
+    p_bundle_create.set_defaults(func=cmd_bundle_create)
+    p_bundle_verify = bundle_sub.add_parser("verify", help="Verify integrity and format of a .vcxpack bundle")
+    p_bundle_verify.add_argument("file", help="Path to .vcxpack bundle file")
+    p_bundle_verify.set_defaults(func=cmd_bundle_verify)
 
     # gc
     p_gc = subparsers.add_parser("gc", help="Pack repository objects and clean unreachable files")
@@ -929,6 +1023,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_fsck.set_defaults(func=cmd_verify)
 
     args = parser.parse_args(argv)
+    if not hasattr(args, "func"):
+        parser.print_help()
+        return 0
     return args.func(args)
 
 

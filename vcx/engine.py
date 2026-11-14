@@ -7,6 +7,7 @@ high-performance distributed version control engine for files of any size and do
 
 from __future__ import annotations
 import concurrent.futures
+import fnmatch
 import hashlib
 import io
 import json
@@ -24,12 +25,15 @@ from vcx.chunker import (
     chunk_file,
 )
 from vcx.index import Index, IndexRow
+from vcx.reflog import record_reflog
 from vcx.semantic import SemanticExtractor
 from vcx.storage import ObjectStorage
 
 
 class VCXEngine:
     """Next-generation version control engine with CDC, Zstd, and SQLite index."""
+
+    IGNORE_DIRS = {".vcx", ".git", "__pycache__", ".pytest_cache"}
 
     def __init__(self, repo_dir: Union[str, Path]):
         self.repo_dir = Path(repo_dir).resolve()
@@ -38,6 +42,52 @@ class VCXEngine:
         self.index = Index(self.repo_dir)
         self.chunker = FastCDCEngine()
         self.semantic = SemanticExtractor()
+
+    def _load_ignore_patterns(self) -> List[str]:
+        """Load patterns from .vcxignore in the repository root."""
+        patterns: List[str] = []
+        ignore_file = self.repo_dir / ".vcxignore"
+        if ignore_file.exists():
+            try:
+                for line in ignore_file.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        patterns.append(line)
+            except Exception:
+                pass
+        return patterns
+
+    def _is_ignored(
+        self,
+        rel_path: str,
+        is_dir: bool = False,
+        patterns: Optional[List[str]] = None,
+    ) -> bool:
+        """Check if relative path matches ignore patterns or IGNORE_DIRS."""
+        clean_rel = rel_path.replace("\\", "/").strip("/")
+        if not clean_rel:
+            return False
+        parts = clean_rel.split("/")
+        if any(p in self.IGNORE_DIRS for p in parts):
+            return True
+        if patterns is None:
+            patterns = self._load_ignore_patterns()
+        for pat in patterns:
+            pat = pat.replace("\\", "/").strip()
+            if not pat:
+                continue
+            if pat.endswith("/"):
+                pat_clean = pat.rstrip("/")
+                if is_dir and (fnmatch.fnmatch(clean_rel, pat_clean) or fnmatch.fnmatch(parts[-1], pat_clean)):
+                    return True
+                if any(fnmatch.fnmatch(p, pat_clean) for p in parts[:-1]):
+                    return True
+            else:
+                if fnmatch.fnmatch(clean_rel, pat) or fnmatch.fnmatch(parts[-1], pat):
+                    return True
+                if any(fnmatch.fnmatch(p, pat) for p in parts[:-1]):
+                    return True
+        return False
 
     @classmethod
     def init(cls, target_dir: Union[str, Path] = ".") -> VCXEngine:
@@ -146,6 +196,7 @@ class VCXEngine:
         Only modified chunks are written to .vcx/objects/; unchanged chunks are reused.
         """
         staged: List[str] = []
+        patterns = self._load_ignore_patterns()
 
         target_files: List[Path] = []
         for p_input in paths:
@@ -154,13 +205,25 @@ class VCXEngine:
             if not full_p.exists():
                 raise FileNotFoundError(f"Path does not exist: {p_input}")
             if full_p.is_file():
-                target_files.append(full_p)
+                if not self._is_ignored(clean_str, is_dir=False, patterns=patterns) or self.index.get(clean_str):
+                    target_files.append(full_p)
             elif full_p.is_dir():
-                for root, _, files in os.walk(full_p):
-                    if ".vcx" in Path(root).parts or ".git" in Path(root).parts:
-                        continue
+                for root, dirs, files in os.walk(full_p):
+                    rel_root = Path(root).relative_to(self.repo_dir)
+                    dirs[:] = [
+                        d for d in dirs
+                        if d not in self.IGNORE_DIRS
+                        and not self._is_ignored(
+                            (rel_root / d).as_posix() if rel_root != Path(".") else d,
+                            is_dir=True,
+                            patterns=patterns,
+                        )
+                    ]
                     for f in files:
-                        target_files.append(Path(root) / f)
+                        full_f = Path(root) / f
+                        rel_f = full_f.relative_to(self.repo_dir).as_posix()
+                        if not self._is_ignored(rel_f, is_dir=False, patterns=patterns) or self.index.get(rel_f):
+                            target_files.append(full_f)
 
         files_to_chunk = []
         for f_path in target_files:
@@ -309,6 +372,15 @@ class VCXEngine:
             for row in self.index.staged_entries():
                 self.index.update_status(row.path, "unstaged")
                 unstaged.append(row.path)
+        if unstaged:
+            record_reflog(
+                self.vcx_dir,
+                self.head_ref or "HEAD",
+                self.head_commit_sha or "0" * 40,
+                self.head_commit_sha or "0" * 40,
+                "reset",
+                f"unstage {len(unstaged)} files",
+            )
         return unstaged
 
     # --- FAST STATUS VIA SQLITE INDEX ---
@@ -339,14 +411,24 @@ class VCXEngine:
         indexed_entries = {row.path: row for row in self.index.entries()}
         seen_worktree: Set[str] = set()
 
+        patterns = self._load_ignore_patterns()
         for root, dirs, files in os.walk(self.repo_dir):
             rel_dir = Path(root).relative_to(self.repo_dir)
-            if ".vcx" in rel_dir.parts or ".git" in rel_dir.parts:
-                continue
+            dirs[:] = [
+                d for d in dirs
+                if d not in self.IGNORE_DIRS
+                and not self._is_ignored(
+                    (rel_dir / d).as_posix() if rel_dir != Path(".") else d,
+                    is_dir=True,
+                    patterns=patterns,
+                )
+            ]
 
             for f in files:
                 full_f = Path(root) / f
                 rel_f = str((full_f.relative_to(self.repo_dir))).replace("\\", "/")
+                if rel_f not in indexed_entries and self._is_ignored(rel_f, is_dir=False, patterns=patterns):
+                    continue
                 seen_worktree.add(rel_f)
                 stat = full_f.stat()
 
@@ -526,6 +608,17 @@ class VCXEngine:
         # Update HEAD
         self.update_head(commit_sha)
 
+        # Record reflog
+        old_head = head_commit_sha or "0" * 40
+        record_reflog(
+            self.vcx_dir,
+            self.head_ref or "HEAD",
+            old_head,
+            commit_sha,
+            "commit",
+            commit_message,
+        )
+
         # Post-commit index cleanup:
         for row in staged_rows:
             curr_path = self.repo_dir / row.path
@@ -544,6 +637,7 @@ class VCXEngine:
             target_ref = str(target_ref[0])
 
         target_ref_str = str(target_ref).strip()
+        old_head_sha = self.head_commit_sha or "0" * 40
 
         # Resolve ref to commit SHA
         target_commit_sha = None
@@ -647,6 +741,15 @@ class VCXEngine:
         # Only update HEAD after checkout succeeds
         if new_head_content:
             (self.vcx_dir / "HEAD").write_text(new_head_content, encoding="utf-8")
+            # Record reflog
+            record_reflog(
+                self.vcx_dir,
+                "HEAD",
+                old_head_sha,
+                target_commit_sha,
+                "checkout",
+                f"moving to {target_ref_str}",
+            )
 
         return reconstructed_count
 
@@ -678,6 +781,14 @@ class VCXEngine:
 
         branch_file.parent.mkdir(parents=True, exist_ok=True)
         branch_file.write_text(f"{target_sha}\n", encoding="utf-8")
+        record_reflog(
+            self.vcx_dir,
+            f"refs/heads/{clean_name}",
+            "0" * 40,
+            target_sha,
+            "branch",
+            f"created from {target_sha[:8]}",
+        )
 
     def list_branches(self) -> List[str]:
         """List all branch names sorted alphabetically."""
@@ -1028,3 +1139,10 @@ class VCXEngine:
             "database_ok": db_ok,
             "errors": errors,
         }
+
+    def fsck(self, full: bool = True) -> Dict[str, Any]:
+        """Verify repository integrity (manifests, CDC chunk checksums, index).
+
+        Alias for verify_repository_integrity() to satisfy PROJECT.md interface contract.
+        """
+        return self.verify_repository_integrity()

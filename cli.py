@@ -25,7 +25,10 @@ except ImportError:
     _HAS_RICH = False
 
 from vcx import __version__
+from vcx.bundle import create_bundle, verify_bundle
+from vcx.core.repository import Repository
 from vcx.engine import VCXEngine
+from vcx.reflog import read_reflog
 
 console = Console() if _HAS_RICH else None
 
@@ -412,6 +415,216 @@ def cmd_version(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_branch(args: argparse.Namespace) -> int:
+    try:
+        engine = VCXEngine.find()
+    except FileNotFoundError as e:
+        print_msg(f"fatal: {e}", style="bold red")
+        return 1
+
+    if args.name:
+        try:
+            engine.create_branch(args.name)
+            print_msg(f"Created branch '{args.name}'", style="bold green")
+            return 0
+        except ValueError as e:
+            print_msg(f"fatal: {e}", style="bold red")
+            return 1
+
+    branches = engine.list_branches()
+    active = engine.head_ref.replace("refs/heads/", "") if engine.head_ref else None
+    if console and sys.stdout.isatty():
+        table = Table(title="Repository Branches", title_justify="left", border_style="cyan")
+        table.add_column("Current", justify="center", width=8)
+        table.add_column("Branch Name", style="white")
+        for b in branches:
+            is_cur = (b == active)
+            table.add_row("*" if is_cur else "", f"[bold green]{b}[/bold green]" if is_cur else b)
+        console.print(table)
+    else:
+        for b in branches:
+            prefix = "* " if b == active else "  "
+            print(f"{prefix}{b}")
+    return 0
+
+
+def cmd_tag(args: argparse.Namespace) -> int:
+    try:
+        engine = VCXEngine.find()
+    except FileNotFoundError as e:
+        print_msg(f"fatal: {e}", style="bold red")
+        return 1
+
+    tags_dir = engine.vcx_dir / "refs" / "tags"
+    tags_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.name:
+        target_sha = args.target or engine.head_commit_sha
+        if not target_sha:
+            print_msg("fatal: cannot create tag: no commits in repository", style="bold red")
+            return 1
+        tag_file = tags_dir / args.name
+        if tag_file.exists():
+            print_msg(f"fatal: tag '{args.name}' already exists", style="bold red")
+            return 1
+        tag_file.write_text(f"{target_sha}\n", encoding="utf-8")
+        print_msg(f"Created tag '{args.name}' pointing to {target_sha[:8]}", style="bold green")
+        return 0
+
+    # List tags
+    tags = sorted([f.name for f in tags_dir.iterdir() if f.is_file()])
+    if console and sys.stdout.isatty():
+        table = Table(title="Repository Tags", title_justify="left", border_style="yellow")
+        table.add_column("Tag Name", style="bold yellow")
+        table.add_column("Commit SHA", style="dim")
+        for t in tags:
+            sha = (tags_dir / t).read_text(encoding="utf-8").strip()
+            table.add_row(t, sha[:8])
+        console.print(table)
+    else:
+        for t in tags:
+            print(t)
+    return 0
+
+
+def cmd_merge(args: argparse.Namespace) -> int:
+    try:
+        repo = Repository.find()
+    except FileNotFoundError as e:
+        print_msg(f"fatal: {e}", style="bold red")
+        return 1
+
+    if getattr(args, "abort", False):
+        if hasattr(repo, "merge_abort") and repo.merge_abort():
+            print_msg("Merge aborted: working tree restored to HEAD.", style="bold green")
+            return 0
+        else:
+            print_msg("fatal: no merge in progress to abort", style="bold red")
+            return 1
+
+    branch = getattr(args, "branch", None)
+    if not branch:
+        print_msg("fatal: branch argument required when not using --abort", style="bold red")
+        return 1
+
+    try:
+        result = repo.merge(branch)
+        if result.success:
+            print_msg(f"Merge successful: integrated '{branch}' into {repo.head_ref or 'HEAD'}", style="bold green")
+            if result.semantic_resolutions:
+                for r in result.semantic_resolutions:
+                    print_msg(f"  * {r}", style="cyan")
+            return 0
+        else:
+            print_msg("Automatic merge failed with conflicts:", style="bold red")
+            for c in result.conflicts:
+                print_msg(f"  [{c.domain}] {c.path}: {c.description}", style="red")
+            return 1
+    except Exception as e:
+        print_msg(f"fatal: {e}", style="bold red")
+        return 1
+
+
+def cmd_gc(args: argparse.Namespace) -> int:
+    try:
+        repo = Repository.find()
+    except FileNotFoundError as e:
+        print_msg(f"fatal: {e}", style="bold red")
+        return 1
+
+    stats = repo.gc()
+    if console and sys.stdout.isatty():
+        table = Table(title="VCX Garbage Collection Complete", border_style="green")
+        table.add_column("Metric", style="white")
+        table.add_column("Value", style="bold green")
+        table.add_row("Packed objects", str(stats.get("packed_objects", 0)))
+        table.add_row("Pruned objects", str(stats.get("pruned_objects", 0)))
+        if stats.get("packfile"):
+            table.add_row("Generated pack", str(stats["packfile"]))
+        console.print(table)
+    else:
+        print("VCX Garbage Collection Complete:")
+        print(f"  * Packed objects:   {stats.get('packed_objects', 0)}")
+        print(f"  * Pruned objects:   {stats.get('pruned_objects', 0)}")
+        if stats.get("packfile"):
+            print(f"  * Generated pack:   {stats['packfile']}")
+    return 0
+
+
+def cmd_reflog(args: argparse.Namespace) -> int:
+    try:
+        try:
+            engine = VCXEngine.find()
+            vcx_dir = engine.vcx_dir
+        except FileNotFoundError:
+            repo = Repository.find()
+            vcx_dir = repo.vcx_dir
+    except FileNotFoundError as e:
+        print_msg(f"fatal: {e}", style="bold red")
+        return 1
+
+    target_ref = getattr(args, "ref", "HEAD") or "HEAD"
+    limit = getattr(args, "limit", 50) or 50
+    entries = read_reflog(vcx_dir, ref_name=target_ref, limit=limit)
+
+    if not entries:
+        print_msg(f"No reflog entries found for '{target_ref}'.", style="yellow")
+        return 0
+
+    if console and sys.stdout.isatty():
+        table = Table(title=f"Reference Log: {target_ref}", border_style="cyan")
+        table.add_column("Index", style="dim", width=8)
+        table.add_column("SHA", style="bold yellow", width=10)
+        table.add_column("Action", style="bold cyan", width=12)
+        table.add_column("Message", style="white")
+        table.add_column("Time", style="dim")
+        for i, entry in enumerate(entries):
+            short_new = entry.new_sha[:8] if entry.new_sha else "00000000"
+            rel_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(entry.timestamp))
+            table.add_row(f"{target_ref}@{{{i}}}", short_new, entry.action, entry.message, rel_time)
+        console.print(table)
+    else:
+        for i, entry in enumerate(entries):
+            short_new = entry.new_sha[:8] if entry.new_sha else "00000000"
+            rel_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(entry.timestamp))
+            print(f"{short_new} {target_ref}@{{{i}}}: {entry.action}: {entry.message} ({rel_time})")
+    return 0
+
+
+def cmd_bundle_create(args: argparse.Namespace) -> int:
+    try:
+        try:
+            repo_or_engine = VCXEngine.find()
+        except FileNotFoundError:
+            repo_or_engine = Repository.find()
+    except FileNotFoundError as e:
+        print_msg(f"fatal: {e}", style="bold red")
+        return 1
+
+    out_file = Path(args.file)
+    refs_filter = getattr(args, "refs", None)
+    try:
+        created = create_bundle(repo_or_engine, out_file, refs=refs_filter)
+        print_msg(f"Created bundle '{created}' successfully.", style="bold green")
+        return 0
+    except Exception as e:
+        print_msg(f"fatal: failed to create bundle: {e}", style="bold red")
+        return 1
+
+
+def cmd_bundle_verify(args: argparse.Namespace) -> int:
+    bundle_file = Path(args.file)
+    valid, errors = verify_bundle(bundle_file)
+    if valid:
+        print_msg(f"Bundle '{bundle_file}' is valid.", style="bold green")
+        return 0
+    else:
+        print_msg(f"Bundle verification failed for '{bundle_file}':", style="bold red")
+        for err in errors:
+            print_msg(f"  * {err}", style="red")
+        return 1
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="vcx",
@@ -460,6 +673,44 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_log = subparsers.add_parser("log", help="Display commit DAG history")
     p_log.add_argument("-n", "--limit", type=int, default=10, help="Maximum number of commits to show")
     p_log.set_defaults(func=cmd_log)
+
+    # branch
+    p_branch = subparsers.add_parser("branch", help="List or create branches")
+    p_branch.add_argument("name", nargs="?", help="New branch name")
+    p_branch.set_defaults(func=cmd_branch)
+
+    # tag
+    p_tag = subparsers.add_parser("tag", help="Create, list, or verify tags")
+    p_tag.add_argument("name", nargs="?", help="Tag name")
+    p_tag.add_argument("target", nargs="?", help="Target commit SHA or branch (defaults to HEAD)")
+    p_tag.set_defaults(func=cmd_tag)
+
+    # merge
+    p_merge = subparsers.add_parser("merge", help="Join two development histories with semantic resolution")
+    p_merge.add_argument("branch", nargs="?", default=None, help="Branch name to merge into current branch")
+    p_merge.add_argument("--abort", action="store_true", help="Abort current merge in progress and reset working tree")
+    p_merge.set_defaults(func=cmd_merge)
+
+    # reflog
+    p_reflog = subparsers.add_parser("reflog", help="Display reference transaction audit log")
+    p_reflog.add_argument("ref", nargs="?", default="HEAD", help="Ref name to inspect (default: HEAD)")
+    p_reflog.add_argument("-n", "--limit", type=int, default=50, help="Max entries to display")
+    p_reflog.set_defaults(func=cmd_reflog)
+
+    # bundle
+    p_bundle = subparsers.add_parser("bundle", help="Create and verify portable single-file repository bundles (.vcxpack)")
+    bundle_sub = p_bundle.add_subparsers(dest="bundle_subcommand", help="Bundle action (create/verify)")
+    p_bundle_create = bundle_sub.add_parser("create", help="Create a single-file .vcxpack bundle")
+    p_bundle_create.add_argument("file", help="Destination bundle file path")
+    p_bundle_create.add_argument("--refs", nargs="*", help="Optional ref names to include")
+    p_bundle_create.set_defaults(func=cmd_bundle_create)
+    p_bundle_verify = bundle_sub.add_parser("verify", help="Verify integrity and format of a .vcxpack bundle")
+    p_bundle_verify.add_argument("file", help="Path to .vcxpack bundle file")
+    p_bundle_verify.set_defaults(func=cmd_bundle_verify)
+
+    # gc
+    p_gc = subparsers.add_parser("gc", help="Pack repository objects and clean unreachable files")
+    p_gc.set_defaults(func=cmd_gc)
 
     # stats
     p_stats = subparsers.add_parser("stats", help="Display repository deduplication, compression, and index analytics")

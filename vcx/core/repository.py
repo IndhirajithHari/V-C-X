@@ -16,6 +16,7 @@ from vcx.core.types import Commit, FileChangeType, FileMode, IndexEntry, MergeCo
 from vcx.diff.delta_engine import DeltaEngine
 from vcx.diff.detector import detect_file_type
 from vcx.diff.merger import SemanticMerger
+from vcx.reflog import record_reflog
 
 
 class Repository:
@@ -412,8 +413,17 @@ class Repository:
             semantic_delta=semantic_delta_meta,
         )
 
+        old_sha = self.head_commit_sha or "0" * 40
         self.update_head(commit_sha)
         commit = self.store.read_commit(commit_sha)
+        record_reflog(
+            self.vcx_dir,
+            self.head_ref or "HEAD",
+            old_sha,
+            commit_sha,
+            "commit",
+            commit.message,
+        )
         return commit_sha, commit
 
     def log(self, limit: int = 20) -> List[Tuple[str, Commit]]:
@@ -443,6 +453,14 @@ class Repository:
             raise ValueError(f"Branch '{name}' already exists")
         branch_file.parent.mkdir(parents=True, exist_ok=True)
         branch_file.write_text(f"{head_sha}\n", encoding="utf-8")
+        record_reflog(
+            self.vcx_dir,
+            f"refs/heads/{name}",
+            "0" * 40,
+            head_sha,
+            "branch",
+            f"created from {head_sha[:8]}",
+        )
 
     def list_branches(self) -> List[Tuple[str, bool]]:
         """List all branch names and whether they are active."""
@@ -458,6 +476,7 @@ class Repository:
 
     def checkout(self, target: str) -> None:
         """Switch branches or checkout commit, updating working tree and index."""
+        old_sha = self.head_commit_sha or "0" * 40
         branch_file = self.vcx_dir / "refs" / "heads" / target
         if branch_file.exists():
             commit_sha = branch_file.read_text(encoding="utf-8").strip()
@@ -488,6 +507,14 @@ class Repository:
                 )
             )
         self.index.write()
+        record_reflog(
+            self.vcx_dir,
+            "HEAD",
+            old_sha,
+            commit_sha,
+            "checkout",
+            f"moving to {target}",
+        )
 
     def merge(
         self,
@@ -569,6 +596,8 @@ class Repository:
                     conflicts.append(conflict)
 
         if conflicts:
+            (self.vcx_dir / "MERGE_HEAD").write_text(f"{theirs_sha}\n", encoding="utf-8")
+            (self.vcx_dir / "ORIG_HEAD").write_text(f"{ours_sha}\n", encoding="utf-8")
             return MergeResult(
                 success=False,
                 merged_shas=merged_shas,
@@ -593,12 +622,208 @@ class Repository:
             },
         )
         self.update_head(commit_sha)
+        (self.vcx_dir / "MERGE_HEAD").unlink(missing_ok=True)
+        (self.vcx_dir / "ORIG_HEAD").unlink(missing_ok=True)
+        record_reflog(
+            self.vcx_dir,
+            self.head_ref or "HEAD",
+            ours_sha,
+            commit_sha,
+            "merge",
+            summary_msg,
+        )
         return MergeResult(
             success=True,
             merged_shas=merged_shas,
             conflicts=[],
             semantic_resolutions=resolutions,
         )
+
+    def merge_abort(self) -> bool:
+        """Abort an in-progress merge with conflicts, restoring working tree and index to HEAD."""
+        merge_head_file = self.vcx_dir / "MERGE_HEAD"
+        if not merge_head_file.exists():
+            return False
+
+        orig_head_file = self.vcx_dir / "ORIG_HEAD"
+        orig_sha = orig_head_file.read_text(encoding="utf-8").strip() if orig_head_file.exists() else self.head_commit_sha
+
+        # Read theirs SHA to identify files introduced by theirs that were not in ours
+        theirs_sha = merge_head_file.read_text(encoding="utf-8").strip()
+        theirs_entries: Dict[str, TreeEntry] = {}
+        if theirs_sha and self.store.has_object(theirs_sha):
+            try:
+                theirs_commit = self.store.read_commit(theirs_sha)
+                theirs_entries = self.store.flatten_tree(theirs_commit.tree_sha)
+            except Exception:
+                pass
+
+        # Checkout the original commit to restore files in ours
+        target = self.head_ref.replace("refs/heads/", "") if self.head_ref else (orig_sha or self.head_commit_sha)
+        if target:
+            self.checkout(target)
+
+        # Remove any lingering files introduced from theirs that did not exist in ours
+        ours_entries = self.get_head_tree_entries()
+        for p in theirs_entries:
+            if p not in ours_entries:
+                disk_f = self.root / p
+                if disk_f.is_file():
+                    disk_f.unlink()
+
+        merge_head_file.unlink(missing_ok=True)
+        orig_head_file.unlink(missing_ok=True)
+
+        record_reflog(
+            self.vcx_dir,
+            self.head_ref or "HEAD",
+            orig_sha or "0" * 40,
+            self.head_commit_sha or "0" * 40,
+            "merge",
+            "abort: reset to HEAD",
+        )
+        return True
+
+    def fsck(self, full: bool = True) -> Dict[str, Any]:
+        """Validate refs, commits, trees, and blobs across the repository.
+
+        Args:
+            full: If True, decompress and verify SHA-256 checksums of all blobs.
+
+        Returns:
+            Dictionary containing verification metrics and list of errors.
+        """
+        errors: List[str] = []
+        refs_checked = 0
+        commits_checked = 0
+        trees_checked = 0
+        blobs_checked = 0
+
+        verified_commits: Set[str] = set()
+        verified_trees: Set[str] = set()
+        verified_blobs: Set[str] = set()
+
+        root_shas: List[str] = []
+
+        # 1. Check HEAD
+        head_file = self.vcx_dir / "HEAD"
+        if head_file.exists():
+            refs_checked += 1
+            content = head_file.read_text(encoding="utf-8").strip()
+            if content.startswith("ref:"):
+                target_ref = content[4:].strip()
+                ref_p = self.vcx_dir / target_ref
+                if ref_p.exists():
+                    sha = ref_p.read_text(encoding="utf-8").strip()
+                    if sha:
+                        root_shas.append(sha)
+            elif content:
+                root_shas.append(content)
+
+        # 2. Check refs/heads/
+        heads_dir = self.vcx_dir / "refs" / "heads"
+        if heads_dir.exists():
+            for root, _, files in os.walk(heads_dir):
+                for f in files:
+                    refs_checked += 1
+                    ref_p = Path(root) / f
+                    try:
+                        sha = ref_p.read_text(encoding="utf-8").strip()
+                        if sha:
+                            root_shas.append(sha)
+                            if not self.store.has_object(sha):
+                                errors.append(f"Ref '{ref_p.name}' points to missing commit '{sha}'")
+                    except Exception as e:
+                        errors.append(f"Failed to read ref '{ref_p}': {e}")
+
+        # 3. Check refs/tags/
+        tags_dir = self.vcx_dir / "refs" / "tags"
+        if tags_dir.exists():
+            for root, _, files in os.walk(tags_dir):
+                for f in files:
+                    refs_checked += 1
+                    ref_p = Path(root) / f
+                    try:
+                        sha = ref_p.read_text(encoding="utf-8").strip()
+                        if sha:
+                            root_shas.append(sha)
+                            if not self.store.has_object(sha):
+                                errors.append(f"Tag '{ref_p.name}' points to missing object '{sha}'")
+                    except Exception as e:
+                        errors.append(f"Failed to read tag '{ref_p}': {e}")
+
+        # 4. Traverse Commit DAG
+        queue = list(set(root_shas))
+        while queue:
+            c_sha = queue.pop(0)
+            if c_sha in verified_commits:
+                continue
+            verified_commits.add(c_sha)
+            commits_checked += 1
+
+            if not self.store.has_object(c_sha):
+                errors.append(f"Missing commit object: {c_sha}")
+                continue
+
+            try:
+                commit = self.store.read_commit(c_sha)
+            except Exception as e:
+                errors.append(f"Corrupted commit object '{c_sha}': {e}")
+                continue
+
+            # Queue parent commits
+            for p_sha in commit.parent_shas:
+                if p_sha not in verified_commits:
+                    queue.append(p_sha)
+
+            # Traverse tree
+            t_sha = commit.tree_sha
+            if t_sha and t_sha not in verified_trees:
+                verified_trees.add(t_sha)
+                trees_checked += 1
+                if not self.store.has_object(t_sha):
+                    errors.append(f"Missing tree object '{t_sha}' for commit '{c_sha}'")
+                    continue
+
+                try:
+                    tree_entries = self.store.flatten_tree(t_sha)
+                    for entry_path, entry in tree_entries.items():
+                        b_sha = entry.sha
+                        if b_sha not in verified_blobs:
+                            verified_blobs.add(b_sha)
+                            blobs_checked += 1
+                            if not self.store.has_object(b_sha):
+                                errors.append(f"Missing blob '{b_sha}' for file '{entry_path}' in tree '{t_sha}'")
+                            elif full:
+                                try:
+                                    self.store.read_blob(b_sha)
+                                except Exception as e:
+                                    errors.append(f"Corrupted blob '{b_sha}' for file '{entry_path}': {e}")
+                except Exception as e:
+                    errors.append(f"Corrupted tree object '{t_sha}': {e}")
+
+        # 5. Check staging index entries
+        for idx_entry in self.index.entries():
+            b_sha = idx_entry.sha
+            if b_sha not in verified_blobs:
+                verified_blobs.add(b_sha)
+                blobs_checked += 1
+                if not self.store.has_object(b_sha):
+                    errors.append(f"Index references missing blob '{b_sha}' for '{idx_entry.path}'")
+                elif full:
+                    try:
+                        self.store.read_blob(b_sha)
+                    except Exception as e:
+                        errors.append(f"Index references corrupted blob '{b_sha}' for '{idx_entry.path}': {e}")
+
+        return {
+            "valid": len(errors) == 0,
+            "refs_checked": refs_checked,
+            "commits_checked": commits_checked,
+            "trees_checked": trees_checked,
+            "blobs_checked": blobs_checked,
+            "errors": errors,
+        }
 
     def _write_worktree_blob(self, rel_path: str, blob_sha: str, mode: str, file_type: str) -> None:
         full_path = self.root / rel_path
