@@ -10,14 +10,13 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/version-2.0.0-blue.svg" alt="Version 2.0.0"/>
   <img src="https://img.shields.io/badge/status-Production%20Ready-success.svg" alt="Production Ready"/>
-  <img src="https://img.shields.io/badge/tests-85%20passed-brightgreen.svg" alt="Tests"/>
+  <img src="https://img.shields.io/badge/tests-107%20passed-brightgreen.svg" alt="Tests"/>
+  <img src="https://img.shields.io/badge/compression-Zstandard%20(zstd)-orange.svg" alt="Zstandard"/>
+  <img src="https://img.shields.io/badge/chunking-FastCDC%20Variable-purple.svg" alt="FastCDC"/>
+  <img src="https://img.shields.io/badge/index-SQLite%20(WAL)-teal.svg" alt="SQLite Index"/>
   <img src="https://img.shields.io/badge/os-Linux%20%7C%20macOS%20%7C%20Windows-blue.svg" alt="Cross Platform"/>
-  <img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python"/>
-  <img src="https://img.shields.io/badge/throughput-3.3%2B%20GB%2Fs%20SIMD-orange.svg" alt="SIMD Throughput"/>
-  <img src="https://img.shields.io/badge/memory-O(1)%20RAM%20Streaming-purple.svg" alt="O(1) RAM"/>
-  <img src="https://img.shields.io/badge/resilience-Crash%20Safe%20ACID-teal.svg" alt="Crash Safe"/>
-  <img src="https://img.shields.io/badge/transport-Resumable%20HTTP-blueviolet.svg" alt="Resumable Transport"/>
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/>
 </p>
 
@@ -74,6 +73,7 @@
 <summary><b>📑 Click to Expand/Collapse Detailed Table of Contents</b></summary>
 
 - [Executive Summary](#executive-summary)
+- [Production Architecture (v2.0): CDC + Antigravity Pipeline](#-production-architecture-v20-cdc--antigravity-pipeline)
 - [Enterprise Capabilities & Comparative Matrix](#-enterprise-capabilities--comparative-matrix)
 - [Industrial System Guarantees & Fault Tolerance](#-industrial-system-guarantees--fault-tolerance)
 - [Multi-Tier Storage Architecture](#-multi-tier-storage-architecture)
@@ -101,6 +101,69 @@
 Modern engineering teams manage heterogeneous artifacts that exceed the architectural boundaries of traditional version control. Monolithic CAD assemblies, multi-layer VFX compositions, hardware HDL pinouts, and columnar datasets either corrupt merge workflows, trigger out-of-memory crashes, or force organizations to deploy brittle external pointer workarounds (e.g., Git LFS).
 
 **VCX (Version Control for Everything)** is an enterprise-grade, 100% standalone version control platform designed for unified asset lifecycles. VCX combines a cryptographic Merkle Directed Acyclic Graph (DAG) with zero-copy kernel streaming, hardware-accelerated SIMD Content-Defined Chunking (CDC), in-memory container recursion, and an autonomous Semantic Differ Agent.
+
+---
+
+## 🏗️ Production Architecture (v2.0): CDC + Antigravity Pipeline
+
+VCX v2.0 introduces an industrial-grade Content-Defined Chunking and Zstandard compression pipeline, eliminating whole-file hashing bottlenecks and enabling sub-millisecond status checks across massive binary repositories:
+
+```mermaid
+flowchart TD
+    subgraph INGEST ["1. Ingestion & Instant Change Detection"]
+        W["Working Directory Files (CAD, EDA, Binaries, Code)"] --> STAT{"SQLite Index (index.db)<br>OS mtime & size check"}
+        STAT -- "Match" --> SKIP["Skip Disk Byte Reads<br>(Instant sub-millisecond status)"]
+        STAT -- "Drift / New" --> CDC["FastCDC Engine (vcx/chunker.py)<br>Gear Rolling Hash (4KB - 64KB)"]
+    end
+
+    subgraph CHUNK_DAG ["2. Variable Chunking & Zstandard Storage"]
+        CDC --> CHUNKS["Variable-Sized Chunks<br>(SHA-256 Hashed)"]
+        CHUNKS --> DEDUP{"Exists in<br>.vcx/objects/?"}
+        DEDUP -- "New Chunk" --> ZSTD["Zstandard Compression<br>(zstd level 3)"]
+        ZSTD --> FANOUT[".vcx/objects/ab/cdef...<br>2-Character Fan-out Tree"]
+        DEDUP -- "Reused" --> MANIFEST
+        FANOUT --> MANIFEST["FileManifest Merkle DAG<br>(Ordered Chunk Hashes)"]
+    end
+
+    subgraph ADAPTERS ["3. Native Semantic Adapters (vcx/adapters/)"]
+        MANIFEST --> ROUTER{"Extension Router<br>(vcx/semantic.py)"}
+        ROUTER -- ".fcstd, .fcproj" --> FC_ADAPT["FreeCAD Adapter<br>In-Memory Document.xml Parser<br>(Extrusions, Fillets, Constraints)"]
+        ROUTER -- ".v, .sv" --> EDA_ADAPT["EDA Verilog Adapter<br>Regex AST Architecture Parser<br>(Ports, FSM States, always_ff)"]
+        ROUTER -- ".docx, .zip" --> ZIP_ADAPT["Archive Adapter<br>In-Memory Container Inspector<br>(Structural XML Diff)"]
+        ROUTER -- "Source Code" --> CODE_ADAPT["Unified Diff Engine<br>(AST Tokens & Line Diffs)"]
+        ROUTER -- "Raw Binaries" --> BIN_ADAPT["Binary Drift Analyzer<br>(Chunk Modification Ratio)"]
+    end
+
+    subgraph AI_PIPELINE ["4. Antigravity Semantic Differ Pipeline"]
+        FC_ADAPT --> EXTRACT["Strict JSON Input Schema<br>(DifferInput)"]
+        EDA_ADAPT --> EXTRACT
+        ZIP_ADAPT --> EXTRACT
+        CODE_ADAPT --> EXTRACT
+        BIN_ADAPT --> EXTRACT
+        EXTRACT --> AGENT["Antigravity Differ Agent<br>(Autonomous Embedded Engine / LLM)"]
+        AGENT --> AI_DELTA["Strict Schema Output<br>• action_summary (&lt;50 chars)<br>• technical_delta (exact bullets)<br>• inferred_intent<br>• domain tags"]
+    end
+
+    subgraph COMMIT_DAG ["5. Immutable Commit DAG & Stream Checkout"]
+        AI_DELTA --> COMMIT_OBJ["Commit DAG Object<br>(Tree SHA + Parents + AI Delta)"]
+        COMMIT_OBJ --> ZSTD_COMMIT["Zstandard Compressed Object<br>(.vcx/objects/...)"]
+        ZSTD_COMMIT --> HEAD["Update HEAD Reference<br>(refs/heads/main)"]
+        ZSTD_COMMIT --> CHECKOUT["Stream Checkout<br>(storage.checkout_file)"]
+    end
+```
+
+### Core v2.0 Architecture Modules
+
+| Module | Location | Primary Architectural Responsibilities |
+| :--- | :--- | :--- |
+| **CDC Chunker** | [`vcx/chunker.py`](file:///home/indhirajith/Documents/VCX/vcx/chunker.py) | FastCDC & Gear rolling-hash variable chunking (4KB–64KB). Eliminates whole-file hashing so modifying 1 byte in a 500MB CAD solid only writes 1-2 chunks to disk. Generates `FileManifest` DAG nodes. |
+| **Zstd Storage** | [`vcx/storage.py`](file:///home/indhirajith/Documents/VCX/vcx/storage.py) | Zstandard (`zstd level 3`) high-ratio compression for all chunks, trees, and commits. Organizes `.vcx/objects/` into Git-style 2-character fan-out directories (`ab/cdef...`). Reconstructs files streamingly via `checkout_file`. |
+| **SQLite Index** | [`vcx/index.py`](file:///home/indhirajith/Documents/VCX/vcx/index.py) | ACID-compliant SQLite staging index (`.vcx/index.db`) in WAL mode. Compares OS `mtime` and `size` to skip disk byte reads on unchanged files, achieving sub-millisecond `vcx status`. |
+| **FreeCAD Adapter** | [`vcx/adapters/freecad_adapter.py`](file:///home/indhirajith/Documents/VCX/vcx/adapters/freecad_adapter.py) | In-memory ZIP inspection of `.FCStd` models. Parses `Document.xml` and extracts exact parametric differences (dimensions, placements, fillets, sketch constraints) without needing a Vision model. |
+| **Verilog/EDA Adapter** | [`vcx/adapters/eda_adapter.py`](file:///home/indhirajith/Documents/VCX/vcx/adapters/eda_adapter.py) | Hardware description AST parser for `.v` and `.sv` files. Detects module boundaries, port bit-widths, procedural blocks (`always_ff`, `always_comb`), and FSM states. |
+| **Semantic Router** | [`vcx/semantic.py`](file:///home/indhirajith/Documents/VCX/vcx/semantic.py) | Pluggable router directing archives, CAD models, hardware RTL, code, and raw binaries into strict `DifferInput` JSON schemas for the Antigravity Semantic Differ Agent. |
+| **Production Engine** | [`vcx/engine.py`](file:///home/indhirajith/Documents/VCX/vcx/engine.py) | High-level unified version control engine orchestrating chunking, compression, index queries, commits, semantic diffs, branching, and stream checkouts. |
+| **Interactive CLI** | [`cli.py`](file:///home/indhirajith/Documents/VCX/cli.py) | Terminal interface with Rich formatting (tables, panels, status colors) and ANSI fallback. |
 
 ---
 
